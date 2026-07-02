@@ -1,0 +1,26 @@
+{
+  "name": "vault-therapy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-knowledge-at-rest AI therapy chat for two users. Test build: local email+password auth.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "initdb": "node server/initdb.js",
+    "test:crypto": "node test/crypto.roundtrip.test.js",
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check server/llm.js && node --check server/routes/vault.js && node --check server/routes/conversations.js && node --check server/routes/chat.js"
+  },
+  "dependencies": {
+    "connect-pg-simple": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "hash-wasm": "^4.12.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

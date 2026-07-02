@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published to host; only reachable on the internal network.
+    expose:
+      - "5432"
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    # Bound to loopback. Point your own tunnel (cloudflared, etc.) at
+    # http://localhost:8080. For LAN testing you can change this to "8080:8080".
+    ports:
+      - "8080:8080"
+    # Run schema migration on start, then boot the server.
+    command: sh -c "node server/initdb.js && node server/index.js"
+
+volumes:
+  db_data:

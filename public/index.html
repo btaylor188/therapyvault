@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vault Therapy</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Argon2id (WASM). Loaded from our own server, no CDN. -->
+    <script src="/vendor/hash-wasm/index.umd.min.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Vault gate (unlock / create) -->
+      <section id="gate" class="gate hidden">
+        <div class="gate-card">
+          <h1>Your private vault</h1>
+          <p id="gate-desc" class="muted"></p>
+          <form id="gate-form">
+            <input
+              id="vault-pw"
+              type="password"
+              autocomplete="off"
+              placeholder="Vault password"
+              required
+            />
+            <input
+              id="vault-pw2"
+              type="password"
+              autocomplete="off"
+              placeholder="Confirm vault password"
+              class="hidden"
+            />
+            <button id="gate-btn" type="submit">Unlock</button>
+            <p id="gate-err" class="err"></p>
+          </form>
+          <p class="muted small">
+            This password is separate from your sign-in. It never leaves this
+            device and cannot be recovered. If you forget it, your history is
+            unreadable — by design.
+          </p>
+        </div>
+      </section>
+
+      <!-- Main app -->
+      <main id="main" class="layout hidden">
+        <aside class="sidebar">
+          <div class="side-head">
+            <span id="who" class="muted small"></span>
+            <button id="logout" class="link" title="Sign out">Sign out</button>
+          </div>
+          <button id="new-conv" class="new-conv">+ New session</button>
+          <ul id="conv-list" class="conv-list"></ul>
+          <div class="side-foot">
+            <button id="lock" class="link">Lock vault</button>
+            <button id="rotate" class="link">Change vault password</button>
+          </div>
+        </aside>
+
+        <section class="chat">
+          <header class="chat-head">
+            <span id="conv-title" class="conv-title">Select or start a session</span>
+            <span id="ctx-meter" class="muted small" title="Approx context size"></span>
+          </header>
+          <div id="messages" class="messages"></div>
+          <form id="composer" class="composer">
+            <textarea
+              id="input"
+              rows="1"
+              placeholder="Type here…"
+              autocomplete="off"
+            ></textarea>
+            <button id="send" type="submit">Send</button>
+          </form>
+          <div id="status" class="status muted small"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — Vault Therapy</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="gate">
+      <div class="gate-card">
+        <h1>Sign in</h1>
+        <p class="muted">Test build — local account. This is your sign-in
+          identity, separate from your vault password.</p>
+        <form id="login-form">
+          <input id="email" type="email" placeholder="Email" autocomplete="username" required />
+          <input id="password" type="password" placeholder="Password"
+                 autocomplete="current-password" required />
+          <button id="btn" type="submit">Sign in</button>
+          <p id="err" class="err"></p>
+        </form>
+        <p class="muted small">First sign-in with an allowlisted email sets that
+          account's password.</p>
+      </div>
+    </section>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>
