@@ -10,11 +10,19 @@ backlog. This file is the short list of things not to break.
 - Vault/encryption layer is production-grade and identical to the final design.
 
 ## Security invariants — do NOT violate
-- Server stores/logs **ciphertext only**, plus non-sensitive metadata. The LLM
-  proxy (`server/routes/chat.js`) sees plaintext transiently in-request and must
-  never persist or log it. Keep the generic 500 error handler.
-- Vault password, KEK, and DEK **never leave the browser**. Server only ever
-  receives `kdf_salt`, `kdf_params`, `wrapped_dek`, `verifier`, and ciphertext.
+- Server stores/logs **ciphertext only**, plus non-sensitive metadata.
+- **Two LLM modes** (`LLM_MODE`, see `server/routes/chat.js`):
+  - `direct` (default): the **browser** calls Anthropic itself with the user's
+    own key (stored DEK-encrypted at `vaults.api_key_enc`, decrypted to memory
+    only). Plaintext never touches the server. Do not add a server hop back
+    into this path.
+  - `proxy` (legacy/OpenAI): the LLM proxy sees plaintext transiently
+    in-request and must never persist or log it.
+  Keep the generic 500 error handler.
+- Vault password, KEK, DEK, and (direct mode) the plaintext API key **never
+  leave the browser**, except the key going straight to Anthropic over TLS.
+  Server only ever receives `kdf_salt`, `kdf_params`, `wrapped_dek`,
+  `verifier`, and ciphertext (incl. `api_key_enc`).
 - DEK lives in **browser memory only** — never localStorage/sessionStorage/cookies.
 - Keep CSP strict: `script-src 'self' 'wasm-unsafe-eval'`, **no inline scripts**.
   Render user/AI content with `textContent`, never `innerHTML`.

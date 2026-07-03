@@ -11,6 +11,7 @@ import { registerAuthRoutes, requireAuth } from './auth.js';
 import vaultRoutes from './routes/vault.js';
 import conversationRoutes from './routes/conversations.js';
 import chatRoutes from './routes/chat.js';
+import memoryRoutes from './routes/memory.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -27,7 +28,9 @@ app.use(
         // 'wasm-unsafe-eval' is required for the Argon2id WASM module (hash-wasm).
         scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
         styleSrc: ["'self'"],
-        connectSrc: ["'self'"],
+        // api.anthropic.com: direct mode — the browser streams from Anthropic
+        // itself so plaintext never touches this server.
+        connectSrc: ["'self'", 'https://api.anthropic.com'],
         imgSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -63,6 +66,7 @@ registerAuthRoutes(app);
 // API (all require an authenticated session).
 app.use('/api/vault', vaultRoutes);
 app.use('/api/conversations', conversationRoutes);
+app.use('/api/memory', memoryRoutes);
 app.use('/api', chatRoutes);
 
 // Serve the Argon2id WASM bundle from the installed package.
@@ -79,11 +83,13 @@ app.get('/login', (req, res) => {
   res.sendFile(join(__dirname, '..', 'public', 'login.html'));
 });
 
-// App shell + assets. Require auth for the shell so unauthenticated users hit login.
-app.get('/', requireAuth, (req, res) => {
-  res.sendFile(join(__dirname, '..', 'public', 'index.html'));
-});
-app.use(express.static(join(__dirname, '..', 'public')));
+// App shell + assets. Require auth for the shell so unauthenticated users hit
+// login. /index.html is gated explicitly too — otherwise express.static would
+// serve it without auth (registered routes win over the static middleware).
+const shell = (req, res) => res.sendFile(join(__dirname, '..', 'public', 'index.html'));
+app.get('/', requireAuth, shell);
+app.get('/index.html', requireAuth, shell);
+app.use(express.static(join(__dirname, '..', 'public'), { index: false }));
 
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 

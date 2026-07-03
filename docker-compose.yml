@@ -25,9 +25,10 @@ services:
       db:
         condition: service_healthy
     # Bound to loopback. Point your own tunnel (cloudflared, etc.) at
-    # http://localhost:8080. For LAN testing you can change this to "8080:8080".
+    # http://localhost:8080. For LAN testing change this to "8080:8080"
+    # (all interfaces) — but note the test build uses non-Secure cookies.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     # Run schema migration on start, then boot the server.
     command: sh -c "node server/initdb.js && node server/index.js"
 

@@ -17,9 +17,15 @@ Docker. Built for one couple's personal use, not a product.
 1. **AI therapist**, not human-to-human. Each user has private sessions with an
    LLM. (A *shared* couples mode is a possible future addition — see backlog.)
 2. **Zero-knowledge at rest.** The DB stores only ciphertext. The admin/host
-   cannot read stored history. The honest caveat: live turns pass through server
-   RAM in-request to reach the LLM — never persisted or logged. Stored history
-   is zero-knowledge; live inference is not. This is inherent to a hosted LLM.
+   cannot read stored history.
+   - In **direct mode** (`LLM_MODE=direct`, the default): the browser calls
+     Anthropic directly with the user's own key (stored DEK-encrypted in the
+     vault). **Plaintext never touches the app server at all** — the old
+     "live turns pass through server RAM" caveat no longer applies. Plaintext
+     exists only in the browser and at Anthropic during inference.
+   - In **proxy mode** (legacy, needed for OpenAI): live turns pass through
+     server RAM in-request — never persisted or logged. Inherent to relaying
+     a hosted LLM.
 3. **LLM backend = Anthropic/OpenAI API** (provider-agnostic interface).
 
 ---

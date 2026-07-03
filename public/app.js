@@ -5,6 +5,7 @@ import {
   encStr,
   decStr,
 } from './crypto.js';
+import { streamAnthropic, completeAnthropic } from './llm.js';
 
 // ---------- state ----------
 const state = {
@@ -16,7 +17,15 @@ const state = {
   convId: null,
   msgs: [], // decrypted: {id, kind, role, content, token_est, archived}
   busy: false,
+  memory: '', // long-term case file (decrypted); '' = none
+  turnsSinceMemory: 0, // messages since the case file was last refreshed
+  apiKey: null, // direct mode: user's Anthropic key, in-memory only (like the DEK)
 };
+
+const direct = () => state.cfg.mode === 'direct';
+
+// Refresh the long-term case file after this many new messages (user+assistant).
+const MEMORY_UPDATE_TURNS = 8;
 
 const $ = (id) => document.getElementById(id);
 const estTokens = (s) => Math.ceil((s || '').length / 4);
@@ -106,13 +115,79 @@ $('gate-form').addEventListener('submit', async (e) => {
 async function enterApp() {
   $('gate').classList.add('hidden');
   $('main').classList.remove('hidden');
-  await loadConversations();
+  if (direct()) {
+    $('key-btn').classList.remove('hidden');
+    state.apiKey = state.vaultRaw.api_key_enc
+      ? await safeDec(state.vaultRaw.api_key_enc, null)
+      : null;
+  }
+  await Promise.all([loadConversations(), loadMemory()]);
+  if (direct() && !state.apiKey) openKeyModal();
+}
+
+// ---------- long-term memory (case file) ----------
+async function loadMemory() {
+  try {
+    const m = await api('/api/memory');
+    state.memory = m.exists ? await safeDec(m.body_enc, '') : '';
+  } catch {
+    state.memory = ''; // non-fatal; chat still works without memory
+  }
+}
+
+async function saveMemory(text) {
+  state.memory = text;
+  if (!text) return api('/api/memory', { method: 'DELETE' });
+  const body_enc = await encStr(state.dekKey, text);
+  return api('/api/memory', { method: 'PUT', body: JSON.stringify({ body_enc }) });
+}
+
+// Fold recent turns into the case file via the LLM proxy, then store encrypted.
+// Non-fatal on failure — worst case the memory is a bit stale.
+async function updateMemory(force = false) {
+  if (!state.dekKey) return;
+  if (!force && state.turnsSinceMemory < MEMORY_UPDATE_TURNS) return;
+  const recent = state.msgs
+    .filter((m) => !m.archived && m.kind === 'message' && (m.role === 'user' || m.role === 'assistant'))
+    .slice(-2 * MEMORY_UPDATE_TURNS)
+    .map((m) => ({ role: m.role, content: m.content }));
+  if (recent.length < 2) return;
+  try {
+    let updated;
+    if (direct()) {
+      updated = await completeAnthropic({
+        apiKey: state.apiKey,
+        model: state.cfg.model,
+        system: state.cfg.prompts.memorize,
+        messages: [
+          ...(state.memory
+            ? [{ role: 'user', content: `[Existing case file]\n${state.memory}` }]
+            : []),
+          ...recent,
+          { role: 'user', content: 'Produce the updated case file now.' },
+        ],
+      });
+    } else {
+      const r = await api('/api/memorize', {
+        method: 'POST',
+        body: JSON.stringify({ memory: state.memory || undefined, messages: recent }),
+      });
+      updated = r.memory;
+    }
+    await saveMemory(updated);
+    state.turnsSinceMemory = 0;
+  } catch (err) {
+    setStatus('Memory update skipped: ' + err.message);
+  }
 }
 
 function lockVault() {
   state.dekKey = null;
+  state.apiKey = null;
   state.convId = null;
   state.msgs = [];
+  state.memory = '';
+  state.turnsSinceMemory = 0;
   $('messages').innerHTML = '';
   $('conv-list').innerHTML = '';
   showGate('unlock');
@@ -136,6 +211,66 @@ $('rotate').addEventListener('click', async () => {
     alert('Vault password changed. Your history is unchanged.');
   } catch (err) {
     alert(err.code === 'BAD_PASSWORD' ? 'Wrong current password.' : err.message);
+  }
+});
+
+// ---------- API key modal (direct mode) ----------
+function openKeyModal() {
+  $('key-input').value = '';
+  $('key-err').textContent = state.apiKey ? '' : 'No key set — chat is disabled until you add one.';
+  $('key-modal').classList.remove('hidden');
+  $('key-input').focus();
+}
+$('key-btn').addEventListener('click', openKeyModal);
+$('key-close').addEventListener('click', () => $('key-modal').classList.add('hidden'));
+$('key-save').addEventListener('click', async () => {
+  const key = $('key-input').value.trim();
+  if (!key) return ($('key-err').textContent = 'Enter a key.');
+  try {
+    const api_key_enc = await encStr(state.dekKey, key);
+    await api('/api/vault/api-key', { method: 'PUT', body: JSON.stringify({ api_key_enc }) });
+    state.apiKey = key;
+    state.vaultRaw.api_key_enc = api_key_enc;
+    $('key-modal').classList.add('hidden');
+  } catch (err) {
+    $('key-err').textContent = err.message;
+  }
+});
+$('key-clear').addEventListener('click', async () => {
+  if (!confirm('Remove your stored API key? Chat will stop working until you add one.')) return;
+  try {
+    await api('/api/vault/api-key', { method: 'PUT', body: JSON.stringify({ api_key_enc: null }) });
+    state.apiKey = null;
+    state.vaultRaw.api_key_enc = null;
+    $('key-modal').classList.add('hidden');
+  } catch (err) {
+    $('key-err').textContent = err.message;
+  }
+});
+
+// ---------- memory modal ----------
+$('memory-btn').addEventListener('click', () => {
+  $('mem-text').value = state.memory;
+  $('mem-err').textContent = '';
+  $('mem-modal').classList.remove('hidden');
+});
+$('mem-close').addEventListener('click', () => $('mem-modal').classList.add('hidden'));
+$('mem-save').addEventListener('click', async () => {
+  try {
+    await saveMemory($('mem-text').value.trim());
+    $('mem-modal').classList.add('hidden');
+  } catch (err) {
+    $('mem-err').textContent = err.message;
+  }
+});
+$('mem-forget').addEventListener('click', async () => {
+  if (!confirm('Erase everything the AI remembers across sessions? This cannot be undone.')) return;
+  try {
+    await saveMemory('');
+    $('mem-text').value = '';
+    $('mem-modal').classList.add('hidden');
+  } catch (err) {
+    $('mem-err').textContent = err.message;
   }
 });
 
@@ -293,8 +428,10 @@ async function sendMessage() {
   state.msgs.push(aMsg);
   updateMeter();
 
-  // 5) compact if needed
+  // 5) compact if needed, then refresh the long-term case file if due
   await maybeCompact();
+  state.turnsSinceMemory += 2;
+  await updateMemory();
   state.busy = false;
 }
 
@@ -307,7 +444,8 @@ async function persistMessage(m) {
   m.id = saved.id;
 }
 
-// Build the model context from active (non-archived) turns + a memo from summaries.
+// Build the model context: active (non-archived) turns + this session's
+// compaction memo + the long-term case file (memory across all sessions).
 function buildContext() {
   const active = state.msgs.filter((m) => !m.archived);
   const memo = active
@@ -317,15 +455,29 @@ function buildContext() {
   const turns = active
     .filter((m) => m.kind === 'message' && (m.role === 'user' || m.role === 'assistant'))
     .map((m) => ({ role: m.role, content: m.content }));
-  return { memo: memo || undefined, messages: turns };
+  return { memo: memo || undefined, memory: state.memory || undefined, messages: turns };
 }
 
 async function streamAssistant(onDelta) {
-  const { memo, messages } = buildContext();
+  const { memo, memory, messages } = buildContext();
+
+  // Direct mode: browser -> Anthropic, system prompt assembled locally.
+  // Plaintext never touches our server.
+  if (direct()) {
+    let system = state.cfg.prompts.system;
+    if (memory) system += `\n\n# Continuity notes — long-term case file (all prior sessions)\n${memory}`;
+    if (memo) system += `\n\n# Continuity notes — earlier in this session (summarized)\n${memo}`;
+    return streamAnthropic(
+      { apiKey: state.apiKey, model: state.cfg.model, system, messages },
+      onDelta
+    );
+  }
+
+  // Proxy mode (legacy / OpenAI): server assembles the system prompt.
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages, memo }),
+    body: JSON.stringify({ messages, memo, memory }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
 
@@ -375,11 +527,23 @@ async function maybeCompact() {
   ];
   let summaryText;
   try {
-    const r = await api('/api/summarize', {
-      method: 'POST',
-      body: JSON.stringify({ messages: summarizeMsgs }),
-    });
-    summaryText = r.summary;
+    if (direct()) {
+      summaryText = await completeAnthropic({
+        apiKey: state.apiKey,
+        model: state.cfg.model,
+        system: state.cfg.prompts.summarize,
+        messages: [
+          ...summarizeMsgs,
+          { role: 'user', content: 'Produce the continuity memo now.' },
+        ],
+      });
+    } else {
+      const r = await api('/api/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ messages: summarizeMsgs }),
+      });
+      summaryText = r.summary;
+    }
   } catch (err) {
     setStatus('Compaction skipped: ' + err.message);
     return;

@@ -24,7 +24,37 @@ CREATE TABLE IF NOT EXISTS vaults (
   kdf_params    JSONB NOT NULL,
   wrapped_dek   TEXT NOT NULL,
   verifier      TEXT NOT NULL,
+  -- Direct mode: the user's Anthropic API key, AES-GCM(DEK, key). The browser
+  -- calls the LLM directly; the server can never read this. Survives password
+  -- rotation unchanged (it is wrapped by the DEK, not the KEK).
+  api_key_enc   TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Idempotent for DBs created before direct mode existed.
+ALTER TABLE vaults ADD COLUMN IF NOT EXISTS api_key_enc TEXT;
+
+-- Prior vault wrappings, archived on every password rotation. Rotation re-wraps
+-- the SAME DEK, so any history row + its (old) vault password can still recover
+-- the DEK. This makes a hijacked-session vault overwrite recoverable instead of
+-- permanent data destruction. Ciphertext only — zero-knowledge is unaffected.
+CREATE TABLE IF NOT EXISTS vault_history (
+  id            BIGSERIAL PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kdf_salt      TEXT NOT NULL,
+  kdf_params    JSONB NOT NULL,
+  wrapped_dek   TEXT NOT NULL,
+  verifier      TEXT NOT NULL,
+  replaced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vault_history_user ON vault_history(user_id, replaced_at DESC);
+
+-- Long-term memory: one rolling "case file" per user, encrypted client-side
+-- (AES-GCM(DEK, plaintext) as "iv:ciphertext"). Injected into the system
+-- prompt alongside per-conversation summaries. Never stored as plaintext.
+CREATE TABLE IF NOT EXISTS memories (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  body_enc      TEXT NOT NULL,
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

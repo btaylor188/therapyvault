@@ -51,6 +51,8 @@
           <button id="new-conv" class="new-conv">+ New session</button>
           <ul id="conv-list" class="conv-list"></ul>
           <div class="side-foot">
+            <button id="memory-btn" class="link">Memory</button>
+            <button id="key-btn" class="link hidden">API key</button>
             <button id="lock" class="link">Lock vault</button>
             <button id="rotate" class="link">Change vault password</button>
           </div>
@@ -74,6 +76,44 @@
           <div id="status" class="status muted small"></div>
         </section>
       </main>
+
+      <!-- API key (direct mode): browser -> Anthropic, key encrypted in vault -->
+      <div id="key-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Anthropic API key</h2>
+          <p class="muted small">
+            Chat goes directly from this browser to Anthropic — your words never
+            pass through the app server. Your key is stored encrypted in your
+            vault; the server cannot read it.
+          </p>
+          <input id="key-input" type="password" autocomplete="off" placeholder="sk-ant-…" />
+          <div class="modal-actions">
+            <button id="key-save">Save</button>
+            <button id="key-clear" class="link">Remove key</button>
+            <button id="key-close" class="link">Close</button>
+          </div>
+          <p id="key-err" class="err small"></p>
+        </div>
+      </div>
+
+      <!-- Long-term memory (case file) viewer/editor -->
+      <div id="mem-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Long-term memory</h2>
+          <p class="muted small">
+            What the AI remembers about you across sessions. Stored encrypted —
+            only you can read it. Edit or clear it freely; it is updated
+            automatically as you talk.
+          </p>
+          <textarea id="mem-text" rows="14" placeholder="Nothing remembered yet."></textarea>
+          <div class="modal-actions">
+            <button id="mem-save">Save</button>
+            <button id="mem-forget" class="link">Forget everything</button>
+            <button id="mem-close" class="link">Close</button>
+          </div>
+          <p id="mem-err" class="err small"></p>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="/app.js"></script>

@@ -31,6 +31,26 @@ Important context you must account for: these sessions are end-to-end private. N
 - If they describe intent to harm someone else, or describe abuse of a child or dependent adult, urge contacting emergency services and — where relevant — a domestic violence hotline (800-799-7233).
 - After any crisis conversation, follow up at the start of later sessions.`;
 
+// Shared task prompts (also served to the browser via /api/config for direct
+// mode, so there is a single source of truth). None of these are secret.
+export const SUMMARIZE_SYSTEM =
+  'You compress a therapy conversation into a concise clinical-style memo for ' +
+  'continuity. Preserve: the client\'s presenting concerns, key facts about their ' +
+  'life and relationships, emotional themes, goals, coping strategies discussed, ' +
+  'and any commitments or homework. Omit small talk. Write in third person, ' +
+  'under 300 words. Output only the memo.';
+
+export const MEMORIZE_SYSTEM =
+  'You maintain a long-term therapy case file for continuity across sessions. ' +
+  'Given the existing case file (if any) and recent conversation turns, produce ' +
+  'the UPDATED case file. Preserve durable facts: name/identity details shared, ' +
+  'relationships, life circumstances, recurring emotional themes, diagnoses or ' +
+  'treatment mentioned, goals, values, coping strategies that helped or failed, ' +
+  'and open commitments or homework. Update or remove anything the recent turns ' +
+  'contradict. Omit transient small talk and session-specific detail that will ' +
+  'not matter next month. Write in third person, plain prose, under 500 words. ' +
+  'Output only the case file.';
+
 // --- Streaming chat. Calls onDelta(textChunk) for each token chunk. ---
 export async function streamChat({ messages, system, temperature = 0.7 }, onDelta) {
   if (PROVIDER === 'anthropic') return streamAnthropic({ messages, system, temperature }, onDelta);
