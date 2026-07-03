@@ -52,20 +52,21 @@ export const MEMORIZE_SYSTEM =
   'Output only the case file.';
 
 // --- Streaming chat. Calls onDelta(textChunk) for each token chunk. ---
-export async function streamChat({ messages, system, temperature = 0.7 }, onDelta) {
-  if (PROVIDER === 'anthropic') return streamAnthropic({ messages, system, temperature }, onDelta);
-  if (PROVIDER === 'openai') return streamOpenAI({ messages, system, temperature }, onDelta);
+// `model` overrides LLM_MODEL per call (e.g. a cheaper model for summaries).
+export async function streamChat({ messages, system, temperature = 0.7, model }, onDelta) {
+  if (PROVIDER === 'anthropic') return streamAnthropic({ messages, system, temperature, model }, onDelta);
+  if (PROVIDER === 'openai') return streamOpenAI({ messages, system, temperature, model }, onDelta);
   throw new Error(`unknown LLM_PROVIDER: ${PROVIDER}`);
 }
 
 // --- Non-streaming completion (used for compaction summaries). ---
-export async function complete({ messages, system, temperature = 0.3 }) {
+export async function complete({ messages, system, temperature = 0.3, model }) {
   let out = '';
-  await streamChat({ messages, system, temperature }, (d) => (out += d));
+  await streamChat({ messages, system, temperature, model }, (d) => (out += d));
   return out;
 }
 
-async function streamAnthropic({ messages, system }, onDelta) {
+async function streamAnthropic({ messages, system, model }, onDelta) {
   const url = (BASE_URL || 'https://api.anthropic.com') + '/v1/messages';
   const resp = await fetch(url, {
     method: 'POST',
@@ -75,7 +76,7 @@ async function streamAnthropic({ messages, system }, onDelta) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: model || MODEL,
       // Claude Sonnet 5 / Opus 4.7+ reject temperature/top_p/top_k (400).
       // max_tokens covers thinking + reply on models with adaptive thinking.
       max_tokens: 4096,
@@ -92,7 +93,7 @@ async function streamAnthropic({ messages, system }, onDelta) {
   });
 }
 
-async function streamOpenAI({ messages, system, temperature }, onDelta) {
+async function streamOpenAI({ messages, system, temperature, model }, onDelta) {
   const url = (BASE_URL || 'https://api.openai.com/v1') + '/chat/completions';
   const full = [{ role: 'system', content: system || DEFAULT_SYSTEM }, ...messages];
   const resp = await fetch(url, {
@@ -101,7 +102,7 @@ async function streamOpenAI({ messages, system, temperature }, onDelta) {
       'content-type': 'application/json',
       authorization: `Bearer ${API_KEY}`,
     },
-    body: JSON.stringify({ model: MODEL, temperature, stream: true, messages: full }),
+    body: JSON.stringify({ model: model || MODEL, temperature, stream: true, messages: full }),
   });
   if (!resp.ok) throw new Error(`openai ${resp.status}: ${await resp.text()}`);
   await consumeSSE(resp, (evt) => {

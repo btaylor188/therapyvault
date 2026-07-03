@@ -5,9 +5,12 @@ Node 22 + Postgres 16). Read `HANDOFF.md` for full context and the prioritized
 backlog. This file is the short list of things not to break.
 
 ## Current build
-- **Test build:** local email+password auth (`server/auth.js`, scrypt), no
-  Azure, no bundled tunnel. Entra provider preserved at `server/auth.entra.js`.
-- Vault/encryption layer is production-grade and identical to the final design.
+- **Auth is env-selectable:** `AUTH_PROVIDER=local` (default; scrypt,
+  `server/auth.local.js`) or `entra` (OIDC + PKCE, `server/auth.entra.js`),
+  chosen by the selector in `server/auth.js`. No bundled tunnel.
+- **Never point both auth providers at the same populated DB** (UUID vs oid
+  user ids). The Entra callback refuses email collisions — keep that guard.
+- Vault/encryption layer is production-grade and identical in all configs.
 
 ## Security invariants — do NOT violate
 - Server stores/logs **ciphertext only**, plus non-sensitive metadata.
@@ -28,8 +31,9 @@ backlog. This file is the short list of things not to break.
   Render user/AI content with `textContent`, never `innerHTML`.
 - Every DB query is **scoped to `req.session.user.id`**. Preserve the
   `ownsConversation` ownership checks in `routes/conversations.js`.
-- Preserve `auth.js` exports (`requireAuth`, `registerAuthRoutes`) and the
-  `req.session.user = { id, email }` shape so swapping back to Entra is one file.
+- Preserve the `auth.js` selector exports (`requireAuth`, `registerAuthRoutes`,
+  `AUTH_PROVIDER`) and keep the `req.session.user = { id, email }` shape
+  identical across both providers.
 
 ## Crypto specifics
 - Envelope: vault pw → Argon2id(salt) → KEK (AES-GCM); random 256-bit DEK wrapped
@@ -41,11 +45,12 @@ backlog. This file is the short list of things not to break.
 ## Dev commands
 - `npm run check` — syntax-check server modules.
 - `npm run test:crypto` — envelope-encryption invariants (no DB needed).
+- `npm run test:validate` — LLM payload-guard checks (no DB needed).
 - `docker compose up -d --build` — full stack (app + postgres) on `127.0.0.1:8080`.
 - Add tests when you add behavior. If you touch crypto, the crypto test must
   still pass and ideally gain a case.
 
 ## Before changing auth or ingress
-This is a test build on purpose. If asked to add Entra or a tunnel, see the
-"Migrating to Entra" and "Serving publicly" sections of `README.md` — don't
-reinvent them.
+Auth providers are selected by env (`AUTH_PROVIDER`), not by editing code — see
+README "Switching to Entra" for the app-registration steps and the mixed-DB
+warning. For tunnels/TLS see README "Serving publicly". Don't reinvent either.

@@ -157,7 +157,7 @@ async function updateMemory(force = false) {
     if (direct()) {
       updated = await completeAnthropic({
         apiKey: state.apiKey,
-        model: state.cfg.model,
+        model: state.cfg.utilityModel || state.cfg.model,
         system: state.cfg.prompts.memorize,
         messages: [
           ...(state.memory
@@ -530,7 +530,7 @@ async function maybeCompact() {
     if (direct()) {
       summaryText = await completeAnthropic({
         apiKey: state.apiKey,
-        model: state.cfg.model,
+        model: state.cfg.utilityModel || state.cfg.model,
         system: state.cfg.prompts.summarize,
         messages: [
           ...summarizeMsgs,

@@ -30,21 +30,25 @@ Docker. Built for one couple's personal use, not a product.
 
 ---
 
-## 2. Current state: TEST BUILD
+## 2. Current state
 
-The repo is currently a **test build**, deliberately simplified from the
-production target:
+Auth is now **selectable at runtime** (`AUTH_PROVIDER`), so the old test-build /
+production split has collapsed into config:
 
-| Concern | Production target | Test build (current) |
+| Concern | Production config | Test/local config |
 |---|---|---|
-| Auth | Entra ID (OIDC + PKCE) | Local email+password (scrypt) |
-| Ingress | Cloudflare Tunnel | None bundled — user runs own tunnel |
-| TLS/cookie | `Secure`, behind tunnel | `NODE_ENV=development`, plain http localhost |
+| Auth | `AUTH_PROVIDER=entra` (OIDC + PKCE, `server/auth.entra.js`) | `AUTH_PROVIDER=local` (scrypt, `server/auth.local.js`) — default |
+| LLM | `LLM_MODE=direct` (browser → Anthropic, per-user key) — default | same, or `LLM_MODE=proxy` for OpenAI/local models |
+| Ingress | Your own tunnel + `NODE_ENV=production` | plain http localhost, `NODE_ENV=development` |
 
-- Entra provider is preserved verbatim at `server/auth.entra.js` (not wired up).
-- Cloudflare was removed from `docker-compose.yml`; app binds `127.0.0.1:8080`.
-- The **vault / encryption layer is identical to production** — the test
-  simplifications are only identity + ingress, never the privacy boundary.
+- `server/auth.js` is a thin provider selector; both providers share exports
+  and the `req.session.user = { id, email }` shape. Entra's msal dependency is
+  loaded only when selected.
+- **Do not switch auth providers on a populated DB** (UUID vs oid user ids).
+  The Entra callback refuses the email collision; see README "Switching to Entra".
+- App binds `127.0.0.1:8080`; no tunnel bundled.
+- The **vault / encryption layer is identical in all configurations** — config
+  toggles never touch the privacy boundary.
 
 ### Verified working
 
@@ -71,9 +75,15 @@ Browser (per user)                     Server (Docker)              External
 vault password ─Argon2id(salt)→ KEK
 random DEK  ─AES-GCM(KEK)→ wrapped DEK ──POST /api/vault──▶ vaults (ciphertext)
 message ─AES-GCM(DEK)→ ciphertext ─────POST /messages────▶ messages (ciphertext)
-decrypt for send ─plaintext(TLS)──────▶ /api/chat (proxy) ──────▶ Anthropic/OpenAI
-                                          (no persistence)          (streams reply)
-local login (email+pw, scrypt) ────────▶ /auth/* (identity only)
+case file ─AES-GCM(DEK)→ ciphertext ───PUT /api/memory───▶ memories (ciphertext)
+API key  ─AES-GCM(DEK)→ ciphertext ────PUT /api/vault/api-key▶ vaults (ciphertext)
+
+direct mode (default): decrypt ─plaintext(TLS)────────────────────▶ Anthropic
+                       (server never in the path)                  (streams reply)
+proxy mode (legacy):   decrypt ─plaintext(TLS)─▶ /api/chat ───────▶ Anthropic/OpenAI
+                                                 (no persistence)  (streams reply)
+
+sign-in (local scrypt | Entra OIDC) ───▶ /auth/* (identity only)
 ```
 
 ### Crypto (the important part)
@@ -105,28 +115,34 @@ resurfaced** — see backlog.
 ## 4. File map
 
 ```
-docker-compose.yml     app + postgres (test: no cloudflared)
+docker-compose.yml     app + postgres (app bound to 127.0.0.1:8080)
 Dockerfile             node:22-alpine, non-root
 package.json           deps: express, express-session, connect-pg-simple,
-                             pg, helmet, hash-wasm, dotenv  (NO msal in test)
-.env.example           copy to .env
+                             pg, helmet, hash-wasm, dotenv, @azure/msal-node
+env.example            copy to .env
 server/
   index.js             express, helmet/CSP, session, route wiring, /login
-  auth.js              LOCAL auth (scrypt) — CURRENT
-  auth.entra.js        Entra provider — REFERENCE ONLY, swap in later
+  auth.js              provider selector (AUTH_PROVIDER=local|entra)
+  auth.local.js        local auth (scrypt) — default
+  auth.entra.js        Entra ID OIDC + PKCE provider
   db.js  initdb.js     pg pool + idempotent schema migration
-  schema.sql           users, vaults, conversations, messages (ciphertext)
-  llm.js               provider-agnostic streaming (anthropic|openai) + DEFAULT_SYSTEM
+  schema.sql           users, vaults(+api_key_enc), vault_history, memories,
+                       conversations, messages (all content ciphertext)
+  llm.js               provider-agnostic streaming + DEFAULT/SUMMARIZE/MEMORIZE prompts
   routes/
-    vault.js           wrapped-DEK / verifier / salt (ciphertext only)
+    vault.js           wrapped-DEK / verifier / salt / api-key; archives old
+                       wrapping to vault_history on rotation
     conversations.js   encrypted messages + transactional compaction commit
-    chat.js            streaming LLM proxy + /summarize + /config
+    chat.js            /config (mode/model/prompts) + proxy-mode chat/summarize/memorize
+    memory.js          encrypted long-term case file (GET/PUT/DELETE)
 public/
-  index.html app.js    app shell + vault gate + chat + streaming + auto-compaction
+  index.html app.js    app shell + vault gate + chat + streaming + compaction
+                       + memory modal + API-key modal
+  llm.js               direct-mode browser -> Anthropic transport
   crypto.js            Argon2id + AES-GCM envelope (WebCrypto + hash-wasm WASM)
-  login.html login.js  test-build sign-in page
+  login.html login.js  local-auth sign-in page
   styles.css
-test/crypto.roundtrip.test.js
+test/crypto.roundtrip.test.js  test/chat.validate.test.js
 README.md  HANDOFF.md  CLAUDE.md
 ```
 
@@ -135,16 +151,20 @@ README.md  HANDOFF.md  CLAUDE.md
 ## 5. How to run on the VM
 
 ```bash
-cp .env.example .env
+cp env.example .env
 openssl rand -hex 48            # -> SESSION_SECRET
-# edit .env: ALLOWED_USERS, POSTGRES_*/DATABASE_URL, LLM_PROVIDER/MODEL/API_KEY
+# edit .env: ALLOWED_USERS, POSTGRES_*/DATABASE_URL, LLM_MODEL(S).
+# LLM_MODE=direct (default) needs no server API key — users paste their own.
+# AUTH_PROVIDER=entra additionally needs the ENTRA_* block.
 docker compose up -d --build
 # open http://localhost:8080
 ```
 
-First sign-in with an allowlisted email registers it (sets password). Then set a
-vault password (min 10 chars). Local dev without Docker: `npm install`,
-`npm run check`, `npm run test:crypto` (crypto test needs no DB).
+First sign-in with an allowlisted email registers it (local auth) or redirects
+to Microsoft (Entra). Then set a vault password (min 10 chars) and, in direct
+mode, paste your Anthropic API key when prompted. Local dev without Docker:
+`npm install`, `npm run check`, `npm run test:crypto`, `npm run test:validate`
+(tests need no DB).
 
 > Path note: this repo was authored under a Windows Cowork workspace. On the VM
 > it's just a normal Node project — ignore any absolute Windows paths in old
@@ -153,6 +173,19 @@ vault password (min 10 chars). Local dev without Docker: `npm install`,
 ---
 
 ## 6. Backlog — prioritized (from a design-gap review)
+
+### Done since the original handoff
+
+- **Direct LLM mode** — browser calls Anthropic with the user's own key
+  (DEK-encrypted at `vaults.api_key_enc`); server out of the plaintext path.
+- **Cross-session memory** — encrypted rolling case file (`memories` table,
+  Memory modal, auto-refresh every ~8 messages).
+- **Utility model split** — compaction/memory run on `LLM_MODEL_UTILITY`
+  (Haiku) for cost.
+- **Entra ID wired in** — `AUTH_PROVIDER=local|entra` selector, mixed-DB guard.
+- **Hardening** — loopback port binding fixed, `/index.html` auth-gated,
+  vault rotation archives the old wrapping to `vault_history` (hijacked-session
+  overwrite is now recoverable).
 
 ### Critical (address before real data goes in)
 
@@ -214,6 +247,6 @@ Do not break these in any change:
   `textContent`, never `innerHTML`.
 - **Every data query is scoped to the authenticated user id.** No cross-user
   read path. Preserve `ownsConversation` checks.
-- Keep `auth.js` exports (`requireAuth`, `registerAuthRoutes`) and the
-  `req.session.user = { id, email }` shape so the Entra swap-back stays a
-  one-file change.
+- Keep the `auth.js` selector exports (`requireAuth`, `registerAuthRoutes`,
+  `AUTH_PROVIDER`) and the `req.session.user = { id, email }` shape identical
+  across both providers (`auth.local.js`, `auth.entra.js`).

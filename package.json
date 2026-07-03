@@ -10,9 +10,10 @@
     "initdb": "node server/initdb.js",
     "test:crypto": "node test/crypto.roundtrip.test.js",
     "test:validate": "node test/chat.validate.test.js",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check server/llm.js && node --check server/routes/vault.js && node --check server/routes/conversations.js && node --check server/routes/chat.js && node --check server/routes/memory.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/auth.local.js && node --check server/auth.entra.js && node --check server/db.js && node --check server/llm.js && node --check server/routes/vault.js && node --check server/routes/conversations.js && node --check server/routes/chat.js && node --check server/routes/memory.js"
   },
   "dependencies": {
+    "@azure/msal-node": "^3.0.0",
     "connect-pg-simple": "^9.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",

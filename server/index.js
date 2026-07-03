@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { pool } from './db.js';
-import { registerAuthRoutes, requireAuth } from './auth.js';
+import { registerAuthRoutes, requireAuth, AUTH_PROVIDER } from './auth.js';
 import vaultRoutes from './routes/vault.js';
 import conversationRoutes from './routes/conversations.js';
 import chatRoutes from './routes/chat.js';
@@ -78,8 +78,10 @@ app.use(
   })
 );
 
-// Login page (public — no auth required).
+// Login page (public — no auth required). Under Entra there is no local login
+// form; send the browser straight into the OIDC flow.
 app.get('/login', (req, res) => {
+  if (AUTH_PROVIDER === 'entra') return res.redirect('/auth/login');
   res.sendFile(join(__dirname, '..', 'public', 'login.html'));
 });
 

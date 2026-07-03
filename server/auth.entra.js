@@ -1,13 +1,15 @@
-// ============================================================================
-// REFERENCE ONLY — not wired up in the test build.
-// This is the Entra ID (Azure AD) auth provider. To switch back to Entra later:
-//   1. `npm install @azure/msal-node`
-//   2. Replace server/auth.js with this file's contents.
-//   3. Restore ENTRA_* vars in .env (see README "Migrating to Entra").
-//   4. Add a users.id migration note: Entra uses the object id (oid) as the PK;
-//      the local-auth build uses a generated uuid. Don't mix the two on one DB.
-// ============================================================================
-// Entra ID (Azure AD) OpenID Connect: authorization code + PKCE, confidential client.
+// Entra ID (Azure AD) auth provider. Selected via AUTH_PROVIDER=entra in
+// server/auth.js (which loads this module — and @azure/msal-node — only when
+// selected). Requires ENTRA_TENANT_ID / ENTRA_CLIENT_ID / ENTRA_CLIENT_SECRET
+// and BASE_URL; register the app with Web redirect URI
+// {BASE_URL}/auth/callback and scopes openid profile email.
+// See README "Switching to Entra".
+//
+// NOTE: Entra keys users by object id (oid); local auth uses generated UUIDs.
+// Do not point both providers at the same populated database — the callback
+// below detects and refuses the email collision rather than corrupting data.
+//
+// Entra ID OpenID Connect: authorization code + PKCE, confidential client.
 // Auth establishes IDENTITY ONLY. It does not unlock the vault.
 import { ConfidentialClientApplication, CryptoProvider } from '@azure/msal-node';
 import { q } from './db.js';
@@ -87,6 +89,25 @@ export function registerAuthRoutes(app) {
 
       const id = claims.oid;
       const email = (claims.preferred_username || claims.email || '').toLowerCase();
+
+      // Refuse a mixed database: if this email already exists under a
+      // different id (i.e. a local-auth UUID), upserting a second user row
+      // would orphan the existing vault/history. Admin must migrate or reset.
+      const { rows: existing } = await q(
+        `SELECT id FROM users WHERE lower(email) = $1`,
+        [email]
+      );
+      if (existing.length && existing[0].id !== id) {
+        req.session.destroy(() => {});
+        console.error(
+          `[auth.entra] refusing sign-in: ${email} already exists under a different ` +
+          `user id (created by local auth). Migrate users.id to the Entra oid or use a fresh DB.`
+        );
+        return res
+          .status(409)
+          .send('This account exists under a different sign-in method. Contact the administrator.');
+      }
+
       await q(
         `INSERT INTO users (id, email) VALUES ($1, $2)
          ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email`,

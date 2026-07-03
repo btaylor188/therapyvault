@@ -20,6 +20,11 @@ router.use(requireAuth);
 // Default: direct unless a server-side LLM_API_KEY is configured.
 const MODE = (process.env.LLM_MODE || (process.env.LLM_API_KEY ? 'proxy' : 'direct')).toLowerCase();
 
+// Utility model: cheaper model for background tasks (compaction summaries,
+// memory/case-file updates). Chat stays on LLM_MODEL. Falls back to LLM_MODEL.
+const MAIN_MODEL = process.env.LLM_MODEL || 'claude-sonnet-5';
+const UTILITY_MODEL = process.env.LLM_MODEL_UTILITY || MAIN_MODEL;
+
 // Non-secret client config (mode, model, compaction tuning, shared prompts).
 router.get('/config', (req, res) => {
   res.json({
@@ -27,7 +32,8 @@ router.get('/config', (req, res) => {
     compactKeepRecent: Number(process.env.COMPACT_KEEP_RECENT || 8),
     provider: process.env.LLM_PROVIDER || 'anthropic',
     mode: MODE,
-    model: process.env.LLM_MODEL || 'claude-sonnet-5',
+    model: MAIN_MODEL,
+    utilityModel: UTILITY_MODEL,
     prompts: {
       system: DEFAULT_SYSTEM,
       summarize: SUMMARIZE_SYSTEM,
@@ -104,6 +110,7 @@ router.post('/summarize', async (req, res, next) => {
     if (err) return res.status(400).json({ error: err });
 
     const text = await complete({
+      model: UTILITY_MODEL,
       system: SUMMARIZE_SYSTEM,
       messages: [
         ...messages,
@@ -130,6 +137,7 @@ router.post('/memorize', async (req, res, next) => {
     }
 
     const text = await complete({
+      model: UTILITY_MODEL,
       system: MEMORIZE_SYSTEM,
       messages: [
         ...(memory
