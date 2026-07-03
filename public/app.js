@@ -282,10 +282,45 @@ async function loadConversations() {
   for (const c of state.convs) {
     const li = document.createElement('li');
     li.className = 'conv-item' + (c.id === state.convId ? ' active' : '');
-    li.textContent = c.title_enc ? await safeDec(c.title_enc, '(untitled)') : 'New session';
+
+    const title = document.createElement('span');
+    title.className = 'conv-item-title';
+    title.textContent = c.title_enc ? await safeDec(c.title_enc, '(untitled)') : 'New session';
+    li.appendChild(title);
+
+    const del = document.createElement('button');
+    del.className = 'conv-del';
+    del.type = 'button';
+    del.textContent = '×';
+    del.title = 'Delete session';
+    del.setAttribute('aria-label', 'Delete session');
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteConversation(c.id);
+    });
+    li.appendChild(del);
+
     li.addEventListener('click', () => openConversation(c.id));
     ul.appendChild(li);
   }
+}
+
+async function deleteConversation(id) {
+  const c = state.convs.find((x) => x.id === id);
+  const label = c?.title_enc ? await safeDec(c.title_enc, 'this session') : 'this session';
+  if (!confirm(`Delete "${label}"? This permanently erases the session and all its messages.`)) {
+    return;
+  }
+  await api(`/api/conversations/${id}`, { method: 'DELETE' });
+  state.convs = state.convs.filter((x) => x.id !== id);
+  if (state.convId === id) {
+    state.convId = null;
+    state.msgs = [];
+    $('messages').innerHTML = '';
+    $('conv-title').textContent = 'Session';
+    updateMeter();
+  }
+  await loadConversations();
 }
 
 async function safeDec(blob, fallback) {
