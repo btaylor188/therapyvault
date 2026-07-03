@@ -8,9 +8,12 @@ must not break).
 
 ## 1. What this is
 
-A two-user AI therapy chat (each user talks privately to an LLM) with
+An AI therapy chat (each user talks privately to an LLM) with
 **zero-knowledge-at-rest** storage and **automatic session compaction**, in
-Docker. Built for one couple's personal use, not a product.
+Docker. Personal use, not a product. User count is not structural: access is
+just the `ALLOWED_USERS` email allowlist (one user or several), and all data
+is strictly per-user. Originally framed for a couple — hence the "shared
+couples mode" idea in the backlog — but it runs fine single-user.
 
 ### Three product decisions already locked (do not relitigate silently)
 

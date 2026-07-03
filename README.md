@@ -1,7 +1,9 @@
 # Vault Therapy
 
-A two-user AI therapy chat with **zero-knowledge-at-rest** storage and
-**automatic session compaction**. Runs in Docker.
+A private AI therapy chat with **zero-knowledge-at-rest** storage and
+**automatic session compaction**. Runs in Docker. Users are whoever is on the
+`ALLOWED_USERS` email allowlist — one or several; each user's sessions are
+strictly private to them.
 
 > **Auth is selectable:** `AUTH_PROVIDER=local` (email+password, the test-build
 > default) or `AUTH_PROVIDER=entra` (Entra ID OIDC — see "Switching to Entra").
@@ -10,7 +12,7 @@ A two-user AI therapy chat with **zero-knowledge-at-rest** storage and
 
 Built to a specific privacy contract: as the admin/host you can read the
 database and the container, and you will see **only ciphertext**. You cannot read
-either user's session history.
+any user's session history.
 
 ---
 

@@ -1,6 +1,7 @@
 # CLAUDE.md — project guardrails for the coding agent
 
-Vault Therapy: a two-user, zero-knowledge-at-rest AI therapy chat (Docker,
+Vault Therapy: an allowlist-gated (`ALLOWED_USERS`, any number of users),
+zero-knowledge-at-rest AI therapy chat (Docker,
 Node 22 + Postgres 16). Read `HANDOFF.md` for full context and the prioritized
 backlog. This file is the short list of things not to break.
 
