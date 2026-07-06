@@ -118,7 +118,6 @@ async function enterApp() {
     ? await safeDec(state.vaultRaw.api_key_enc, null)
     : null;
   await Promise.all([loadConversations(), loadMemory(), loadPrefs()]);
-  armIdleLock();
   if (!state.apiKey) openKeyModal();
 }
 
@@ -174,7 +173,6 @@ async function updateMemory(force = false) {
 }
 
 function lockVault() {
-  clearTimeout(idleTimer);
   state.dekKey = null;
   state.apiKey = null;
   state.convId = null;
@@ -182,28 +180,11 @@ function lockVault() {
   state.memory = '';
   state.turnsSinceMemory = 0;
   state.prefs = { style: 'integrative', custom: '' };
-  $('messages').replaceChildren();
-  $('conv-list').replaceChildren();
+  $('messages').innerHTML = '';
+  $('conv-list').innerHTML = '';
   showGate('unlock');
 }
 $('lock').addEventListener('click', lockVault);
-
-// Auto-lock: wipe the DEK + API key from memory after this long without user
-// activity, so an unattended unlocked tab doesn't stay a target indefinitely.
-const IDLE_LOCK_MS = 15 * 60 * 1000;
-let idleTimer = null;
-function armIdleLock() {
-  if (!state.dekKey) return;
-  clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    if (state.busy) return armIdleLock(); // never lock mid-reply
-    lockVault();
-    $('gate-desc').textContent =
-      'Locked after 15 minutes of inactivity. Enter your vault password to continue.';
-  }, IDLE_LOCK_MS);
-}
-document.addEventListener('pointerdown', armIdleLock, { passive: true });
-document.addEventListener('keydown', armIdleLock, { passive: true });
 
 $('logout').addEventListener('click', async () => {
   const { redirect } = await api('/auth/logout', { method: 'POST' });
@@ -312,7 +293,7 @@ const MAX_CUSTOM_CHARS = 4000;
 
 function openStyleModal() {
   const sel = $('style-select');
-  sel.replaceChildren();
+  sel.innerHTML = '';
   for (const s of state.cfg.styles || []) {
     const opt = document.createElement('option');
     opt.value = s.id;
@@ -360,7 +341,7 @@ $('style-reset').addEventListener('click', async () => {
 async function loadConversations() {
   state.convs = await api('/api/conversations');
   const ul = $('conv-list');
-  ul.replaceChildren();
+  ul.innerHTML = '';
   for (const c of state.convs) {
     const li = document.createElement('li');
     li.className = 'conv-item' + (c.id === state.convId ? ' active' : '');
@@ -398,7 +379,7 @@ async function deleteConversation(id) {
   if (state.convId === id) {
     state.convId = null;
     state.msgs = [];
-    $('messages').replaceChildren();
+    $('messages').innerHTML = '';
     $('conv-title').textContent = 'Session';
     updateMeter();
   }
@@ -444,7 +425,7 @@ async function openConversation(id) {
 // ---------- rendering ----------
 function renderMessages() {
   const box = $('messages');
-  box.replaceChildren();
+  box.innerHTML = '';
   for (const m of state.msgs) {
     if (m.archived) continue;
     if (m.kind === 'summary') {
@@ -699,8 +680,5 @@ function setStatus(s) {
 
 // ---------- go ----------
 init().catch((e) => {
-  const pre = document.createElement('pre');
-  pre.style.padding = '2rem';
-  pre.textContent = 'Startup error: ' + e.message;
-  document.body.replaceChildren(pre);
+  document.body.innerHTML = `<pre style="padding:2rem">Startup error: ${e.message}</pre>`;
 });

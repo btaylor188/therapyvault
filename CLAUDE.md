@@ -27,13 +27,8 @@ backlog. This file is the short list of things not to break.
   Server only ever receives `kdf_salt`, `kdf_params`, `wrapped_dek`,
   `verifier`, and ciphertext (incl. `api_key_enc`).
 - DEK lives in **browser memory only** — never localStorage/sessionStorage/cookies.
-  The DEK `CryptoKey` is imported **non-extractable** (`public/crypto.js`
-  `importDEK`); password rotation re-wraps from raw bytes, never `exportKey`.
-  Keep it that way. An idle timer auto-locks the vault after 15 min.
-- Keep CSP strict: `script-src 'self' 'wasm-unsafe-eval'`,
-  `require-trusted-types-for 'script'`, **no inline scripts**. Render user/AI
-  content with `textContent`/`replaceChildren`, never `innerHTML` — enforced
-  by `npm run check` (`check:dom` greps public JS for DOM-XSS sinks).
+- Keep CSP strict: `script-src 'self' 'wasm-unsafe-eval'`, **no inline scripts**.
+  Render user/AI content with `textContent`, never `innerHTML`.
 - Every DB query is **scoped to `req.session.user.id`**. Preserve the
   `ownsConversation` ownership checks in `routes/conversations.js`.
 - Preserve the `auth.js` selector exports (`requireAuth`, `registerAuthRoutes`,

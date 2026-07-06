@@ -192,14 +192,9 @@ test runs standalone with no DB.
   route ever handles message plaintext. Keep it that way if you extend it. Also
   ensure your reverse proxy isn't configured to log request bodies.
 - **XSS = key exposure.** The DEK lives in browser memory. A script-injection
-  bug could abuse it. Mitigations in place: strict CSP (`script-src 'self'
-  'wasm-unsafe-eval'` + `require-trusted-types-for 'script'`, which makes
-  `innerHTML`-class sinks throw), no inline scripts, all rendering via
-  `textContent`/`replaceChildren` (enforced by `npm run check`), the DEK
-  `CryptoKey` imported **non-extractable** (injected script could decrypt
-  while the tab is open but can never export the raw key), and a 15-minute
-  idle auto-lock that wipes the DEK and API key. Preserve these invariants in
-  any change.
+  bug would expose it. Mitigations in place: strict CSP (`script-src 'self'
+  'wasm-unsafe-eval'`), no inline scripts, message rendering via `textContent`
+  (never `innerHTML`). Preserve these invariants in any change.
 - **Metadata leakage.** Counts, timestamps, sizes are visible to the host.
   Padding/normalization is not implemented.
 - **Argon2id params** (`64 MiB / t=3 / p=1`) are set in `public/crypto.js`.

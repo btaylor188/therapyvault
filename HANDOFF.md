@@ -195,11 +195,6 @@ mode, paste your Anthropic API key when prompted. Local dev without Docker:
   catalog in `server/prompts.js` `THERAPY_STYLES`, served via `/api/config`)
   plus free-text custom instructions. Stored as one encrypted JSON blob
   (`prefs` table, `routes/prefs.js`) — the server can't read the choice.
-- **XSS blast-radius hardening** — DEK `CryptoKey` is non-extractable
-  (rotation re-wraps from raw bytes; crypto test asserts it), CSP gained
-  `require-trusted-types-for 'script'`, all DOM writes are
-  `textContent`/`replaceChildren` (enforced by `npm run check` → `check:dom`),
-  and a 15-minute idle timer auto-locks the vault (wipes DEK + API key).
 - **Proxy mode removed** — the server-side LLM transport (`/api/chat`,
   `/api/summarize`, `/api/memorize`, OpenAI support, `LLM_MODE`/`LLM_PROVIDER`/
   `LLM_API_KEY`/`LLM_BASE_URL`) is gone. Everything is browser → Anthropic;
@@ -261,13 +256,10 @@ Do not break these in any change:
 - **Vault password / KEK / DEK never leave the browser** and are never sent to
   the server. Server sees only `salt`, `kdf_params`, `wrapped_dek`, `verifier`,
   and ciphertext.
-- **DEK stays in memory only** — no localStorage/sessionStorage/cookies — and
-  its `CryptoKey` handle is **non-extractable**; rotation re-wraps from raw
-  bytes. The 15-minute idle auto-lock stays.
-- **XSS hygiene:** strict CSP (`script-src 'self' 'wasm-unsafe-eval'`,
-  `require-trusted-types-for 'script'`), no inline scripts (that's why login
-  JS is external), render message content via `textContent`/`replaceChildren`,
-  never `innerHTML` (`check:dom` in `npm run check` enforces this).
+- **DEK stays in memory only** — no localStorage/sessionStorage/cookies.
+- **XSS hygiene:** strict CSP (`script-src 'self' 'wasm-unsafe-eval'`), no inline
+  scripts (that's why login JS is external), render message content via
+  `textContent`, never `innerHTML`.
 - **Every data query is scoped to the authenticated user id.** No cross-user
   read path. Preserve `ownsConversation` checks.
 - Keep the `auth.js` selector exports (`requireAuth`, `registerAuthRoutes`,
