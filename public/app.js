@@ -118,6 +118,7 @@ async function enterApp() {
     ? await safeDec(state.vaultRaw.api_key_enc, null)
     : null;
   await Promise.all([loadConversations(), loadMemory(), loadPrefs()]);
+  armIdleLock();
   if (!state.apiKey) openKeyModal();
 }
 
@@ -173,6 +174,7 @@ async function updateMemory(force = false) {
 }
 
 function lockVault() {
+  clearTimeout(idleTimer);
   state.dekKey = null;
   state.apiKey = null;
   state.convId = null;
@@ -185,6 +187,23 @@ function lockVault() {
   showGate('unlock');
 }
 $('lock').addEventListener('click', lockVault);
+
+// Auto-lock: wipe the DEK + API key from memory after this long without user
+// activity, so an unattended unlocked tab doesn't stay a target indefinitely.
+const IDLE_LOCK_MS = 15 * 60 * 1000;
+let idleTimer = null;
+function armIdleLock() {
+  if (!state.dekKey) return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (state.busy) return armIdleLock(); // never lock mid-reply
+    lockVault();
+    $('gate-desc').textContent =
+      'Locked after 15 minutes of inactivity. Enter your vault password to continue.';
+  }, IDLE_LOCK_MS);
+}
+document.addEventListener('pointerdown', armIdleLock, { passive: true });
+document.addEventListener('keydown', armIdleLock, { passive: true });
 
 $('logout').addEventListener('click', async () => {
   const { redirect } = await api('/auth/logout', { method: 'POST' });
