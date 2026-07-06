@@ -10,7 +10,8 @@
     "initdb": "node server/initdb.js",
     "test:crypto": "node test/crypto.roundtrip.test.js",
     "test:prompts": "node test/prompts.test.js",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/auth.local.js && node --check server/auth.entra.js && node --check server/db.js && node --check server/prompts.js && node --check server/routes/vault.js && node --check server/routes/conversations.js && node --check server/routes/config.js && node --check server/routes/memory.js && node --check server/routes/prefs.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/auth.local.js && node --check server/auth.entra.js && node --check server/db.js && node --check server/prompts.js && node --check server/routes/vault.js && node --check server/routes/conversations.js && node --check server/routes/config.js && node --check server/routes/memory.js && node --check server/routes/prefs.js && npm run check:dom",
+    "check:dom": "! grep -nE 'innerHTML|outerHTML|insertAdjacentHTML|document\\.write' public/*.js"
   },
   "dependencies": {
     "@azure/msal-node": "^3.0.0",

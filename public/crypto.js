@@ -94,8 +94,10 @@ export async function createVaultMaterial(password) {
   };
 }
 
-// Unlock an existing vault. Throws 'BAD_PASSWORD' if the password is wrong.
-export async function unlockVault(password, vault) {
+// Unwrap the raw DEK bytes with the password-derived KEK. Internal only:
+// the raw bytes exist transiently for (re)wrapping and are never attached to
+// an extractable key handle. Throws 'BAD_PASSWORD' if the password is wrong.
+async function unwrapDEK(password, vault) {
   const salt = unb64(vault.kdf_salt);
   const params = vault.kdf_params || ARGON2_PARAMS;
   const kek = await deriveKEK(password, salt, params);
@@ -107,14 +109,18 @@ export async function unlockVault(password, vault) {
     e.code = 'BAD_PASSWORD';
     throw e;
   }
-  const dekRaw = await gcmDecrypt(kek, vault.wrapped_dek);
-  return importDEK(dekRaw);
+  return gcmDecrypt(kek, vault.wrapped_dek);
 }
 
-// Rotate the vault password: re-wrap the SAME DEK under a new KEK.
+// Unlock an existing vault. Throws 'BAD_PASSWORD' if the password is wrong.
+export async function unlockVault(password, vault) {
+  return importDEK(await unwrapDEK(password, vault));
+}
+
+// Rotate the vault password: re-wrap the SAME DEK under a new KEK. Works from
+// the freshly unwrapped raw bytes, never from a key handle.
 export async function rotatePassword(oldPassword, newPassword, vault) {
-  const dekKey = await unlockVault(oldPassword, vault); // verifies old password
-  const dekRaw = new Uint8Array(await crypto.subtle.exportKey('raw', dekKey));
+  const dekRaw = await unwrapDEK(oldPassword, vault); // verifies old password
   const salt = randomBytes(16);
   const kek = await deriveKEK(newPassword, salt);
   const wrapped = await gcmEncrypt(kek, dekRaw);
@@ -127,9 +133,12 @@ export async function rotatePassword(oldPassword, newPassword, vault) {
   };
 }
 
-// DEK is imported extractable so password rotation can re-wrap it.
+// The DEK handle is NOT extractable: script that gets hold of it (e.g. via
+// XSS) can decrypt only while the page is open — it can never export the raw
+// key for offline use against a stolen DB. Rotation re-wraps from unwrapDEK's
+// raw bytes, so nothing ever needs to export this handle.
 function importDEK(raw) {
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, [
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, [
     'encrypt',
     'decrypt',
   ]);

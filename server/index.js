@@ -36,6 +36,10 @@ app.use(
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
+        // Trusted Types: DOM XSS sinks (innerHTML etc.) throw at the platform
+        // level. The client uses textContent/replaceChildren exclusively —
+        // enforced by `npm run check` (check:dom).
+        requireTrustedTypesFor: ["'script'"],
       },
     },
     crossOriginEmbedderPolicy: false,
