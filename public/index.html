@@ -51,6 +51,7 @@
           <button id="new-conv" class="new-conv">+ New session</button>
           <ul id="conv-list" class="conv-list"></ul>
           <div class="side-foot">
+            <button id="style-btn" class="link">Therapy style</button>
             <button id="memory-btn" class="link">Memory</button>
             <button id="key-btn" class="link hidden">API key</button>
             <button id="lock" class="link">Lock vault</button>
@@ -61,7 +62,17 @@
         <section class="chat">
           <header class="chat-head">
             <span id="conv-title" class="conv-title">Select or start a session</span>
-            <span id="ctx-meter" class="muted small" title="Approx context size"></span>
+            <span class="head-actions">
+              <button
+                id="compact-btn"
+                type="button"
+                class="link small"
+                title="Fold older turns into a summary and refresh long-term memory now, without waiting for the automatic threshold"
+              >
+                Compact now
+              </button>
+              <span id="ctx-meter" class="muted small" title="Approx context size"></span>
+            </span>
           </header>
           <div id="messages" class="messages"></div>
           <form id="composer" class="composer">
@@ -93,6 +104,33 @@
             <button id="key-close" class="link">Close</button>
           </div>
           <p id="key-err" class="err small"></p>
+        </div>
+      </div>
+
+      <!-- Therapy style + custom instructions (stored encrypted in prefs) -->
+      <div id="style-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Therapy style</h2>
+          <p class="muted small">
+            Choose the therapeutic approach the AI leads with, and add your own
+            instructions. Stored encrypted — only you can read your choices.
+            Safety boundaries always apply regardless of style.
+          </p>
+          <label class="muted small" for="style-select">Approach</label>
+          <select id="style-select"></select>
+          <p id="style-desc" class="muted small"></p>
+          <label class="muted small" for="style-custom">Custom instructions (optional)</label>
+          <textarea
+            id="style-custom"
+            rows="6"
+            placeholder="Anything you want the AI to know or do differently — tone, focus areas, things to avoid…"
+          ></textarea>
+          <div class="modal-actions">
+            <button id="style-save">Save</button>
+            <button id="style-reset" class="link">Reset to default</button>
+            <button id="style-close" class="link">Close</button>
+          </div>
+          <p id="style-err" class="err small"></p>
         </div>
       </div>
 

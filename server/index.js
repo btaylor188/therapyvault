@@ -12,6 +12,7 @@ import vaultRoutes from './routes/vault.js';
 import conversationRoutes from './routes/conversations.js';
 import chatRoutes from './routes/chat.js';
 import memoryRoutes from './routes/memory.js';
+import prefsRoutes from './routes/prefs.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -67,6 +68,7 @@ registerAuthRoutes(app);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/memory', memoryRoutes);
+app.use('/api/prefs', prefsRoutes);
 app.use('/api', chatRoutes);
 
 // Serve the Argon2id WASM bundle from the installed package.

@@ -138,6 +138,7 @@ server/
     conversations.js   encrypted messages + transactional compaction commit
     chat.js            /config (mode/model/prompts) + proxy-mode chat/summarize/memorize
     memory.js          encrypted long-term case file (GET/PUT/DELETE)
+    prefs.js           encrypted therapy-style + custom-prompt blob (GET/PUT/DELETE)
 public/
   index.html app.js    app shell + vault gate + chat + streaming + compaction
                        + memory modal + API-key modal
@@ -189,6 +190,17 @@ mode, paste your Anthropic API key when prompted. Local dev without Docker:
 - **Hardening** — loopback port binding fixed, `/index.html` auth-gated,
   vault rotation archives the old wrapping to `vault_history` (hijacked-session
   overwrite is now recoverable).
+- **Session delete** — × button per conversation (confirm dialog), backed by
+  the user-scoped `DELETE /api/conversations/:id`.
+- **Manual compaction** — "Compact now" in the chat header forces compaction
+  + a case-file refresh outside the automatic thresholds.
+- **Therapy styles + custom prompt** — sidebar "Therapy style" modal
+  (integrative/CBT/ACT/IFS/person-centered/psychodynamic/solution-focused,
+  catalog in `server/llm.js` `THERAPY_STYLES`, served via `/api/config`) plus
+  free-text custom instructions. Stored as one encrypted JSON blob
+  (`prefs` table, `routes/prefs.js`) — the server can't read the choice; in
+  proxy mode the style id + custom text travel per-request like message
+  plaintext (validated by `validatePrefs` in `routes/chat.js`).
 
 ### Critical (address before real data goes in)
 
@@ -222,7 +234,7 @@ mode, paste your Anthropic API key when prompted. Local dev without Docker:
    real couples-therapy primitive. Non-trivial crypto (shared-key exchange).
 9. **Retrieval over archived turns** — compaction is lossy; add client-side
    search/embeddings so old detail can resurface.
-10. Stop/regenerate, message edit, therapeutic-modality selection (CBT/IFS/etc).
+10. Stop/regenerate, message edit. (Therapeutic-modality selection: done.)
 
 ### Ops / hardening
 

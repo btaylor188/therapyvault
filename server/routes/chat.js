@@ -8,6 +8,7 @@ import {
   DEFAULT_SYSTEM,
   SUMMARIZE_SYSTEM,
   MEMORIZE_SYSTEM,
+  THERAPY_STYLES,
 } from '../llm.js';
 
 const router = Router();
@@ -39,6 +40,7 @@ router.get('/config', (req, res) => {
       summarize: SUMMARIZE_SYSTEM,
       memorize: MEMORIZE_SYSTEM,
     },
+    styles: THERAPY_STYLES,
   });
 });
 
@@ -61,23 +63,45 @@ export function validate(messages) {
   return null;
 }
 
+// Proxy-mode style/custom-prompt guard. Both are optional; style must be a
+// known id and custom instructions are length-capped.
+const STYLE_IDS = new Set(THERAPY_STYLES.map((s) => s.id));
+const MAX_CUSTOM_CHARS = 4000;
+
+export function validatePrefs(style, custom) {
+  if (style != null && (typeof style !== 'string' || !STYLE_IDS.has(style))) {
+    return 'invalid style';
+  }
+  if (custom != null && (typeof custom !== 'string' || custom.length > MAX_CUSTOM_CHARS)) {
+    return 'invalid custom prompt';
+  }
+  return null;
+}
+
 // Streaming chat: text/event-stream of {delta} then {done}.
 router.post('/chat', async (req, res, next) => {
   try {
-    const { messages, memo, memory } = req.body || {};
+    const { messages, memo, memory, style, custom } = req.body || {};
     const err = validate(messages);
     if (err) return res.status(400).json({ error: err });
     if ((memo && memo.length > MAX_MEMO_CHARS) || (memory && memory.length > MAX_MEMO_CHARS)) {
       return res.status(400).json({ error: 'memo too large' });
     }
+    const perr = validatePrefs(style, custom);
+    if (perr) return res.status(400).json({ error: perr });
 
-    // Continuity material (decrypted client-side, appended to the system
-    // prompt, never stored):
+    // System-prompt extras (all decrypted client-side, appended in-request,
+    // never stored):
+    //  - style:  id of the therapy style the user picked (prompt looked up here)
+    //  - custom: the user's own extra instructions
     //  - memory: long-term case file spanning all prior sessions
     //  - memo:   summary of earlier turns in THIS session (compaction)
+    const styleDef = style ? THERAPY_STYLES.find((s) => s.id === style) : null;
     let system;
-    if (memory || memo) {
+    if (memory || memo || styleDef?.prompt || custom) {
       system = DEFAULT_SYSTEM;
+      if (styleDef?.prompt) system += `\n\n# Therapeutic approach chosen by the user\n${styleDef.prompt}`;
+      if (custom) system += `\n\n# Custom instructions from the user\n${custom}`;
       if (memory) system += `\n\n# Continuity notes — long-term case file (all prior sessions)\n${memory}`;
       if (memo) system += `\n\n# Continuity notes — earlier in this session (summarized)\n${memo}`;
     }

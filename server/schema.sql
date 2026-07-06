@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS memories (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Per-user preferences: therapy style + custom instructions, as one encrypted
+-- JSON blob (AES-GCM(DEK, json) as "iv:ciphertext"). Never stored as plaintext.
+CREATE TABLE IF NOT EXISTS prefs (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  body_enc      TEXT NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

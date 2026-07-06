@@ -20,6 +20,7 @@ const state = {
   memory: '', // long-term case file (decrypted); '' = none
   turnsSinceMemory: 0, // messages since the case file was last refreshed
   apiKey: null, // direct mode: user's Anthropic key, in-memory only (like the DEK)
+  prefs: { style: 'integrative', custom: '' }, // therapy style + custom instructions (decrypted)
 };
 
 const direct = () => state.cfg.mode === 'direct';
@@ -121,7 +122,7 @@ async function enterApp() {
       ? await safeDec(state.vaultRaw.api_key_enc, null)
       : null;
   }
-  await Promise.all([loadConversations(), loadMemory()]);
+  await Promise.all([loadConversations(), loadMemory(), loadPrefs()]);
   if (direct() && !state.apiKey) openKeyModal();
 }
 
@@ -144,14 +145,15 @@ async function saveMemory(text) {
 
 // Fold recent turns into the case file via the LLM proxy, then store encrypted.
 // Non-fatal on failure — worst case the memory is a bit stale.
+// Returns true if the case file was actually refreshed.
 async function updateMemory(force = false) {
-  if (!state.dekKey) return;
-  if (!force && state.turnsSinceMemory < MEMORY_UPDATE_TURNS) return;
+  if (!state.dekKey) return false;
+  if (!force && state.turnsSinceMemory < MEMORY_UPDATE_TURNS) return false;
   const recent = state.msgs
     .filter((m) => !m.archived && m.kind === 'message' && (m.role === 'user' || m.role === 'assistant'))
     .slice(-2 * MEMORY_UPDATE_TURNS)
     .map((m) => ({ role: m.role, content: m.content }));
-  if (recent.length < 2) return;
+  if (recent.length < 2) return false;
   try {
     let updated;
     if (direct()) {
@@ -176,8 +178,10 @@ async function updateMemory(force = false) {
     }
     await saveMemory(updated);
     state.turnsSinceMemory = 0;
+    return true;
   } catch (err) {
     setStatus('Memory update skipped: ' + err.message);
+    return false;
   }
 }
 
@@ -188,6 +192,7 @@ function lockVault() {
   state.msgs = [];
   state.memory = '';
   state.turnsSinceMemory = 0;
+  state.prefs = { style: 'integrative', custom: '' };
   $('messages').innerHTML = '';
   $('conv-list').innerHTML = '';
   showGate('unlock');
@@ -271,6 +276,77 @@ $('mem-forget').addEventListener('click', async () => {
     $('mem-modal').classList.add('hidden');
   } catch (err) {
     $('mem-err').textContent = err.message;
+  }
+});
+
+// ---------- prefs (therapy style + custom instructions) ----------
+// Stored server-side as one encrypted JSON blob, like the case file.
+async function loadPrefs() {
+  try {
+    const p = await api('/api/prefs');
+    if (!p.exists) return;
+    const parsed = JSON.parse(await safeDec(p.body_enc, '{}'));
+    state.prefs = {
+      style: typeof parsed.style === 'string' ? parsed.style : 'integrative',
+      custom: typeof parsed.custom === 'string' ? parsed.custom : '',
+    };
+  } catch {
+    // non-fatal; defaults stand
+  }
+}
+
+async function savePrefs() {
+  const body_enc = await encStr(state.dekKey, JSON.stringify(state.prefs));
+  return api('/api/prefs', { method: 'PUT', body: JSON.stringify({ body_enc }) });
+}
+
+const styleById = (id) => (state.cfg.styles || []).find((s) => s.id === id);
+
+const MAX_CUSTOM_CHARS = 4000; // mirrors the proxy-mode server guard
+
+function openStyleModal() {
+  const sel = $('style-select');
+  sel.innerHTML = '';
+  for (const s of state.cfg.styles || []) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.label;
+    sel.appendChild(opt);
+  }
+  sel.value = styleById(state.prefs.style) ? state.prefs.style : 'integrative';
+  $('style-desc').textContent = styleById(sel.value)?.description || '';
+  $('style-custom').value = state.prefs.custom;
+  $('style-err').textContent = '';
+  $('style-modal').classList.remove('hidden');
+}
+$('style-btn').addEventListener('click', openStyleModal);
+$('style-close').addEventListener('click', () => $('style-modal').classList.add('hidden'));
+$('style-select').addEventListener('change', () => {
+  $('style-desc').textContent = styleById($('style-select').value)?.description || '';
+});
+$('style-save').addEventListener('click', async () => {
+  const custom = $('style-custom').value.trim();
+  if (custom.length > MAX_CUSTOM_CHARS) {
+    $('style-err').textContent = `Custom instructions too long (max ${MAX_CUSTOM_CHARS} characters).`;
+    return;
+  }
+  try {
+    state.prefs = { style: $('style-select').value, custom };
+    await savePrefs();
+    $('style-modal').classList.add('hidden');
+    setStatus('Therapy style saved. It applies from your next message.');
+  } catch (err) {
+    $('style-err').textContent = err.message;
+  }
+});
+$('style-reset').addEventListener('click', async () => {
+  try {
+    state.prefs = { style: 'integrative', custom: '' };
+    await api('/api/prefs', { method: 'DELETE' });
+    $('style-modal').classList.add('hidden');
+    setStatus('Therapy style reset to default.');
+  } catch (err) {
+    $('style-err').textContent = err.message;
   }
 });
 
@@ -500,6 +576,9 @@ async function streamAssistant(onDelta) {
   // Plaintext never touches our server.
   if (direct()) {
     let system = state.cfg.prompts.system;
+    const stylePrompt = styleById(state.prefs.style)?.prompt;
+    if (stylePrompt) system += `\n\n# Therapeutic approach chosen by the user\n${stylePrompt}`;
+    if (state.prefs.custom) system += `\n\n# Custom instructions from the user\n${state.prefs.custom}`;
     if (memory) system += `\n\n# Continuity notes — long-term case file (all prior sessions)\n${memory}`;
     if (memo) system += `\n\n# Continuity notes — earlier in this session (summarized)\n${memo}`;
     return streamAnthropic(
@@ -508,11 +587,19 @@ async function streamAssistant(onDelta) {
     );
   }
 
-  // Proxy mode (legacy / OpenAI): server assembles the system prompt.
+  // Proxy mode (legacy / OpenAI): server assembles the system prompt; the
+  // style id + custom instructions travel with the request like the messages
+  // themselves (transient plaintext, never persisted).
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages, memo, memory }),
+    body: JSON.stringify({
+      messages,
+      memo,
+      memory,
+      style: state.prefs.style,
+      custom: state.prefs.custom || undefined,
+    }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
 
@@ -537,10 +624,12 @@ async function streamAssistant(onDelta) {
 }
 
 // ---------- compaction ----------
-async function maybeCompact() {
+// force=true (the "Compact now" button) skips the token threshold but still
+// keeps the most recent turns verbatim. Returns true if a summary was made.
+async function maybeCompact(force = false) {
   const active = state.msgs.filter((m) => !m.archived);
   const total = active.reduce((s, m) => s + (m.token_est || estTokens(m.content)), 0);
-  if (total <= state.cfg.compactTokenThreshold) return;
+  if (!force && total <= state.cfg.compactTokenThreshold) return false;
 
   setStatus('Compacting older messages…');
 
@@ -551,8 +640,12 @@ async function maybeCompact() {
   const oldSummaries = active.filter((m) => m.kind === 'summary');
   const foldable = [...oldSummaries, ...foldTurns];
   if (foldTurns.length < 2) {
-    setStatus('');
-    return; // nothing meaningful to fold yet
+    setStatus(
+      force
+        ? `Nothing to compact yet — the newest ${keep} turns always stay verbatim.`
+        : ''
+    );
+    return false; // nothing meaningful to fold yet
   }
 
   // Ask the model to summarize prior summary + folded turns.
@@ -581,7 +674,7 @@ async function maybeCompact() {
     }
   } catch (err) {
     setStatus('Compaction skipped: ' + err.message);
-    return;
+    return false;
   }
 
   const body_enc = await encStr(state.dekKey, summaryText);
@@ -608,7 +701,36 @@ async function maybeCompact() {
   renderMessages();
   updateMeter();
   setStatus('Compacted. Older turns are still stored (encrypted) but no longer sent to the model.');
+  return true;
 }
+
+// Manual "Compact now": run compaction + a case-file refresh immediately,
+// outside the automatic thresholds.
+$('compact-btn').addEventListener('click', async () => {
+  if (state.busy) return;
+  if (!state.convId) return setStatus('Open a session first.');
+  if (direct() && !state.apiKey) return setStatus('Add your API key first (sidebar → API key).');
+  state.busy = true;
+  $('compact-btn').disabled = true;
+  try {
+    const compacted = await maybeCompact(true);
+    setStatus('Refreshing long-term memory…');
+    const memorized = await updateMemory(true);
+    if (compacted || memorized) {
+      setStatus(
+        [
+          compacted ? 'Compacted this session' : 'Nothing to compact',
+          memorized ? 'long-term memory refreshed.' : 'memory unchanged.',
+        ].join('; ')
+      );
+    } else {
+      setStatus('Nothing to do yet — have a bit more conversation first.');
+    }
+  } finally {
+    state.busy = false;
+    $('compact-btn').disabled = false;
+  }
+});
 
 function setStatus(s) {
   $('status').textContent = s;
