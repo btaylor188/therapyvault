@@ -10,7 +10,7 @@ import { streamAnthropic, completeAnthropic } from './llm.js';
 // ---------- state ----------
 const state = {
   me: null,
-  cfg: { compactTokenThreshold: 8000, compactKeepRecent: 8, provider: 'anthropic' },
+  cfg: { compactTokenThreshold: 8000, compactKeepRecent: 8 },
   vaultRaw: null, // raw vault material from server (for rotation)
   dekKey: null, // in-memory only; cleared on lock
   convs: [],
@@ -19,11 +19,9 @@ const state = {
   busy: false,
   memory: '', // long-term case file (decrypted); '' = none
   turnsSinceMemory: 0, // messages since the case file was last refreshed
-  apiKey: null, // direct mode: user's Anthropic key, in-memory only (like the DEK)
+  apiKey: null, // user's Anthropic key, in-memory only (like the DEK)
   prefs: { style: 'integrative', custom: '' }, // therapy style + custom instructions (decrypted)
 };
-
-const direct = () => state.cfg.mode === 'direct';
 
 // Refresh the long-term case file after this many new messages (user+assistant).
 const MEMORY_UPDATE_TURNS = 8;
@@ -116,14 +114,11 @@ $('gate-form').addEventListener('submit', async (e) => {
 async function enterApp() {
   $('gate').classList.add('hidden');
   $('main').classList.remove('hidden');
-  if (direct()) {
-    $('key-btn').classList.remove('hidden');
-    state.apiKey = state.vaultRaw.api_key_enc
-      ? await safeDec(state.vaultRaw.api_key_enc, null)
-      : null;
-  }
+  state.apiKey = state.vaultRaw.api_key_enc
+    ? await safeDec(state.vaultRaw.api_key_enc, null)
+    : null;
   await Promise.all([loadConversations(), loadMemory(), loadPrefs()]);
-  if (direct() && !state.apiKey) openKeyModal();
+  if (!state.apiKey) openKeyModal();
 }
 
 // ---------- long-term memory (case file) ----------
@@ -143,8 +138,9 @@ async function saveMemory(text) {
   return api('/api/memory', { method: 'PUT', body: JSON.stringify({ body_enc }) });
 }
 
-// Fold recent turns into the case file via the LLM proxy, then store encrypted.
-// Non-fatal on failure — worst case the memory is a bit stale.
+// Fold recent turns into the case file (browser -> Anthropic on the utility
+// model), then store encrypted. Non-fatal on failure — worst case the memory
+// is a bit stale.
 // Returns true if the case file was actually refreshed.
 async function updateMemory(force = false) {
   if (!state.dekKey) return false;
@@ -155,27 +151,18 @@ async function updateMemory(force = false) {
     .map((m) => ({ role: m.role, content: m.content }));
   if (recent.length < 2) return false;
   try {
-    let updated;
-    if (direct()) {
-      updated = await completeAnthropic({
-        apiKey: state.apiKey,
-        model: state.cfg.utilityModel || state.cfg.model,
-        system: state.cfg.prompts.memorize,
-        messages: [
-          ...(state.memory
-            ? [{ role: 'user', content: `[Existing case file]\n${state.memory}` }]
-            : []),
-          ...recent,
-          { role: 'user', content: 'Produce the updated case file now.' },
-        ],
-      });
-    } else {
-      const r = await api('/api/memorize', {
-        method: 'POST',
-        body: JSON.stringify({ memory: state.memory || undefined, messages: recent }),
-      });
-      updated = r.memory;
-    }
+    const updated = await completeAnthropic({
+      apiKey: state.apiKey,
+      model: state.cfg.utilityModel || state.cfg.model,
+      system: state.cfg.prompts.memorize,
+      messages: [
+        ...(state.memory
+          ? [{ role: 'user', content: `[Existing case file]\n${state.memory}` }]
+          : []),
+        ...recent,
+        { role: 'user', content: 'Produce the updated case file now.' },
+      ],
+    });
     await saveMemory(updated);
     state.turnsSinceMemory = 0;
     return true;
@@ -219,7 +206,7 @@ $('rotate').addEventListener('click', async () => {
   }
 });
 
-// ---------- API key modal (direct mode) ----------
+// ---------- API key modal ----------
 function openKeyModal() {
   $('key-input').value = '';
   $('key-err').textContent = state.apiKey ? '' : 'No key set — chat is disabled until you add one.';
@@ -302,7 +289,7 @@ async function savePrefs() {
 
 const styleById = (id) => (state.cfg.styles || []).find((s) => s.id === id);
 
-const MAX_CUSTOM_CHARS = 4000; // mirrors the proxy-mode server guard
+const MAX_CUSTOM_CHARS = 4000;
 
 function openStyleModal() {
   const sel = $('style-select');
@@ -483,6 +470,7 @@ async function sendMessage() {
   const input = $('input');
   const text = input.value.trim();
   if (!text || state.busy) return;
+  if (!state.apiKey) return openKeyModal();
   if (!state.convId) {
     const c = await api('/api/conversations', { method: 'POST', body: JSON.stringify({}) });
     state.convs.unshift(c);
@@ -569,58 +557,20 @@ function buildContext() {
   return { memo: memo || undefined, memory: state.memory || undefined, messages: turns };
 }
 
+// Browser -> Anthropic, system prompt assembled locally.
+// Plaintext never touches our server.
 async function streamAssistant(onDelta) {
   const { memo, memory, messages } = buildContext();
-
-  // Direct mode: browser -> Anthropic, system prompt assembled locally.
-  // Plaintext never touches our server.
-  if (direct()) {
-    let system = state.cfg.prompts.system;
-    const stylePrompt = styleById(state.prefs.style)?.prompt;
-    if (stylePrompt) system += `\n\n# Therapeutic approach chosen by the user\n${stylePrompt}`;
-    if (state.prefs.custom) system += `\n\n# Custom instructions from the user\n${state.prefs.custom}`;
-    if (memory) system += `\n\n# Continuity notes — long-term case file (all prior sessions)\n${memory}`;
-    if (memo) system += `\n\n# Continuity notes — earlier in this session (summarized)\n${memo}`;
-    return streamAnthropic(
-      { apiKey: state.apiKey, model: state.cfg.model, system, messages },
-      onDelta
-    );
-  }
-
-  // Proxy mode (legacy / OpenAI): server assembles the system prompt; the
-  // style id + custom instructions travel with the request like the messages
-  // themselves (transient plaintext, never persisted).
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      memo,
-      memory,
-      style: state.prefs.style,
-      custom: state.prefs.custom || undefined,
-    }),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 2);
-      if (!line.startsWith('data:')) continue;
-      const evt = JSON.parse(line.slice(5).trim());
-      if (evt.error) throw new Error(evt.error);
-      if (evt.delta) onDelta(evt.delta);
-      if (evt.done) return;
-    }
-  }
+  let system = state.cfg.prompts.system;
+  const stylePrompt = styleById(state.prefs.style)?.prompt;
+  if (stylePrompt) system += `\n\n# Therapeutic approach chosen by the user\n${stylePrompt}`;
+  if (state.prefs.custom) system += `\n\n# Custom instructions from the user\n${state.prefs.custom}`;
+  if (memory) system += `\n\n# Continuity notes — long-term case file (all prior sessions)\n${memory}`;
+  if (memo) system += `\n\n# Continuity notes — earlier in this session (summarized)\n${memo}`;
+  return streamAnthropic(
+    { apiKey: state.apiKey, model: state.cfg.model, system, messages },
+    onDelta
+  );
 }
 
 // ---------- compaction ----------
@@ -655,23 +605,15 @@ async function maybeCompact(force = false) {
   ];
   let summaryText;
   try {
-    if (direct()) {
-      summaryText = await completeAnthropic({
-        apiKey: state.apiKey,
-        model: state.cfg.utilityModel || state.cfg.model,
-        system: state.cfg.prompts.summarize,
-        messages: [
-          ...summarizeMsgs,
-          { role: 'user', content: 'Produce the continuity memo now.' },
-        ],
-      });
-    } else {
-      const r = await api('/api/summarize', {
-        method: 'POST',
-        body: JSON.stringify({ messages: summarizeMsgs }),
-      });
-      summaryText = r.summary;
-    }
+    summaryText = await completeAnthropic({
+      apiKey: state.apiKey,
+      model: state.cfg.utilityModel || state.cfg.model,
+      system: state.cfg.prompts.summarize,
+      messages: [
+        ...summarizeMsgs,
+        { role: 'user', content: 'Produce the continuity memo now.' },
+      ],
+    });
   } catch (err) {
     setStatus('Compaction skipped: ' + err.message);
     return false;
@@ -709,7 +651,7 @@ async function maybeCompact(force = false) {
 $('compact-btn').addEventListener('click', async () => {
   if (state.busy) return;
   if (!state.convId) return setStatus('Open a session first.');
-  if (direct() && !state.apiKey) return setStatus('Add your API key first (sidebar → API key).');
+  if (!state.apiKey) return setStatus('Add your API key first (sidebar → API key).');
   state.busy = true;
   $('compact-btn').disabled = true;
   try {

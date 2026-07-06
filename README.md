@@ -22,21 +22,17 @@ any user's session history.
 |---|---|---|
 | Session history (messages, titles, summaries) | Postgres, `AES-GCM(DEK)` ciphertext | **No** — needs the vault password, which is never sent to the server |
 | Long-term memory ("case file") | Postgres, `AES-GCM(DEK)` ciphertext | **No** |
-| Anthropic API key (direct mode) | Postgres, `AES-GCM(DEK)` ciphertext | **No** |
+| Therapy-style prefs + custom instructions | Postgres, `AES-GCM(DEK)` ciphertext | **No** |
+| Anthropic API key | Postgres, `AES-GCM(DEK)` ciphertext | **No** |
 | Vault password | Nowhere. Typed in the browser each unlock | **No** |
 | Derived key (KEK) / data key (DEK) | Browser memory only, cleared on lock | **No** |
-| **Live message being sent to the AI** | Depends on `LLM_MODE` — see below | direct: **No** · proxy: **Yes, in principle** |
+| **Live message being sent to the AI** | Browser → Anthropic directly over TLS | **No** — it never touches the app server |
 
-Two LLM modes (`LLM_MODE`):
-
-- **`direct` (default, Anthropic only).** The browser calls `api.anthropic.com`
-  itself with the user's own API key (stored encrypted in their vault, decrypted
-  to browser memory at unlock). **Plaintext never touches the app server** —
-  it exists only in the browser and at Anthropic during inference, under their
-  API data terms.
-- **`proxy` (legacy, supports OpenAI).** The browser sends plaintext over TLS to
-  `/api/chat`, which relays it to the provider. It is **never written to the
-  database or logs**, but exists in server RAM for the duration of the request.
+All LLM traffic is **browser-direct**: the browser calls `api.anthropic.com`
+itself with the user's own API key (stored encrypted in their vault, decrypted
+to browser memory at unlock). **Plaintext never touches the app server** — it
+exists only in the browser and at Anthropic during inference, under their API
+data terms. There is no server-side LLM transport or relay of any kind.
 
 If you forget the vault password, **the history is permanently unreadable**.
 There is no recovery path — that is the point.
@@ -61,10 +57,8 @@ message ─AES-GCM(DEK)→ ciphertext ─────POST /messages────�
 case file ─AES-GCM(DEK)→ ciphertext ───PUT /api/memory───▶ memories (ciphertext)
 API key  ─AES-GCM(DEK)→ ciphertext ────PUT /api/vault/api-key▶ vaults (ciphertext)
 
-direct mode:  decrypt for send ─plaintext(TLS)────────────────────▶ Anthropic
+chat:         decrypt for send ─plaintext(TLS)────────────────────▶ Anthropic
               (server never sees plaintext)                        (streams reply)
-proxy mode:   decrypt for send ─plaintext(TLS)─▶ /api/chat ───────▶ Anthropic/OpenAI
-                                                 (no persistence)  (streams reply)
 
 sign-in (local scrypt or Entra OIDC) ──▶ /auth/* (identity only)
 ```
@@ -114,11 +108,10 @@ openssl rand -hex 48        # -> paste into SESSION_SECRET
 ```
 
 Fill in `ALLOWED_USERS` (the emails allowed to sign in), `POSTGRES_*` +
-`DATABASE_URL`, and the `LLM_*` block. In the default `LLM_MODE=direct` no
-server-side API key is needed — each user pastes their own Anthropic key into
-the app after unlocking (stored encrypted in their vault). For the legacy proxy
-mode set `LLM_MODE=proxy` plus `LLM_PROVIDER` and `LLM_API_KEY`. For local
-testing leave `NODE_ENV=development` and `BASE_URL=http://localhost:8080`.
+`DATABASE_URL`, and the `LLM_MODEL(S)`. No server-side API key exists — each
+user pastes their own Anthropic key into the app after unlocking (stored
+encrypted in their vault). For local testing leave `NODE_ENV=development` and
+`BASE_URL=http://localhost:8080`.
 
 ### 2. Run
 
@@ -137,8 +130,8 @@ The app container runs the schema migration (`initdb.js`) then starts on
 2. **Set a vault password** (min 10 chars) when prompted. This is separate from
    the login password, never leaves the browser, encrypts all history, and
    cannot be recovered or reset by the admin.
-3. **Add your Anthropic API key** (direct mode) when the dialog appears. It is
-   encrypted into your vault; the sidebar "API key" button changes or removes it.
+3. **Add your Anthropic API key** when the dialog appears. It is encrypted
+   into your vault; the sidebar "API key" button changes or removes it.
 
 Auth here is deliberately minimal — it exists so the two accounts are separated
 and the tunnel isn't wide open. The real privacy guarantee is the vault layer,
@@ -191,13 +184,13 @@ test runs standalone with no DB.
 
 ## Security notes & limitations
 
-- **Live plaintext.** In direct mode the app server never sees it; the browser
-  and Anthropic do (inherent to hosted inference). If you ever want plaintext to
-  never leave your hardware, run proxy mode against a local model (Ollama)
-  behind the OpenAI-compatible interface; `llm.js` is provider-agnostic.
-- **No plaintext logging.** The error handler returns generic messages; the LLM
-  proxy never logs bodies. Keep it that way if you extend it. Also ensure your
-  reverse proxy isn't configured to log request bodies.
+- **Live plaintext.** The app server never sees it; the browser and Anthropic
+  do (inherent to hosted inference). If you ever want plaintext to never leave
+  your hardware, you would need to reintroduce a relay to a local model — the
+  server-side proxy mode that supported this was removed for simplicity.
+- **No plaintext logging.** The error handler returns generic messages and no
+  route ever handles message plaintext. Keep it that way if you extend it. Also
+  ensure your reverse proxy isn't configured to log request bodies.
 - **XSS = key exposure.** The DEK lives in browser memory. A script-injection
   bug would expose it. Mitigations in place: strict CSP (`script-src 'self'
   'wasm-unsafe-eval'`), no inline scripts, message rendering via `textContent`
@@ -226,20 +219,21 @@ server/
   auth.entra.js      Entra ID OIDC + PKCE provider
   db.js  initdb.js   pg pool + schema migration
   schema.sql         users, vaults(+api_key_enc), vault_history, memories,
-                     conversations, messages (all content ciphertext)
-  llm.js             provider-agnostic streaming + shared prompts
+                     prefs, conversations, messages (all content ciphertext)
+  prompts.js         shared prompt + therapy-style catalog (non-secret)
   routes/
     vault.js         wrapped-DEK / verifier / salt / api-key + rotation history
     conversations.js encrypted messages + transactional compaction
-    chat.js          /config + proxy-mode chat/summarize/memorize
+    config.js        /config — models, compaction tuning, prompt catalog
     memory.js        encrypted long-term case file (GET/PUT/DELETE)
+    prefs.js         encrypted therapy-style + custom-prompt blob (GET/PUT/DELETE)
 public/
   crypto.js          Argon2id + AES-GCM envelope (WebCrypto)
-  llm.js             direct-mode browser -> Anthropic transport
+  llm.js             browser -> Anthropic streaming transport
   app.js             vault gate, chat, streaming, compaction, memory, API key
   login.html login.js local sign-in page
   index.html styles.css
 test/
   crypto.roundtrip.test.js   envelope-encryption invariants
-  chat.validate.test.js      LLM-proxy payload guard
+  prompts.test.js            prompt/style-catalog sanity checks
 ```

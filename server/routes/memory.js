@@ -1,7 +1,7 @@
 // Long-term memory ("case file") storage. One rolling blob per user, encrypted
 // client-side with the DEK. The server stores and returns ciphertext only —
-// same zero-knowledge posture as messages. Summarization of plaintext happens
-// via the LLM proxy (/api/memorize in routes/chat.js), never here.
+// same zero-knowledge posture as messages. Summarization happens in the
+// browser (direct Anthropic call with the user's own key), never here.
 import { Router } from 'express';
 import { q } from '../db.js';
 import { requireAuth } from '../auth.js';

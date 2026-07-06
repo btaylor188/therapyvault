@@ -10,7 +10,7 @@ import { pool } from './db.js';
 import { registerAuthRoutes, requireAuth, AUTH_PROVIDER } from './auth.js';
 import vaultRoutes from './routes/vault.js';
 import conversationRoutes from './routes/conversations.js';
-import chatRoutes from './routes/chat.js';
+import configRoutes from './routes/config.js';
 import memoryRoutes from './routes/memory.js';
 import prefsRoutes from './routes/prefs.js';
 
@@ -29,8 +29,8 @@ app.use(
         // 'wasm-unsafe-eval' is required for the Argon2id WASM module (hash-wasm).
         scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
         styleSrc: ["'self'"],
-        // api.anthropic.com: direct mode — the browser streams from Anthropic
-        // itself so plaintext never touches this server.
+        // api.anthropic.com: the browser streams from Anthropic itself so
+        // plaintext never touches this server.
         connectSrc: ["'self'", 'https://api.anthropic.com'],
         imgSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
@@ -69,7 +69,7 @@ app.use('/api/vault', vaultRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/memory', memoryRoutes);
 app.use('/api/prefs', prefsRoutes);
-app.use('/api', chatRoutes);
+app.use('/api', configRoutes);
 
 // Serve the Argon2id WASM bundle from the installed package.
 app.use(
@@ -105,4 +105,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`[app] listening on :${PORT} (provider=${process.env.LLM_PROVIDER})`));
+app.listen(PORT, () => console.log(`[app] listening on :${PORT}`));

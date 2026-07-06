@@ -1,8 +1,7 @@
 // Per-user preferences (therapy style + custom instructions). One encrypted
 // blob per user, same zero-knowledge posture as memories: the server stores
-// and returns ciphertext only. In direct mode even the chosen style never
-// reaches the server in plaintext; in proxy mode it is sent per-request like
-// message plaintext (transient, never persisted).
+// and returns ciphertext only. Even the chosen style never reaches the
+// server in plaintext — prompt assembly happens entirely in the browser.
 import { Router } from 'express';
 import { q } from '../db.js';
 import { requireAuth } from '../auth.js';

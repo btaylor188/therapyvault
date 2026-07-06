@@ -86,7 +86,7 @@ router.put('/', async (req, res, next) => {
 });
 
 // Store/replace/clear the user's LLM API key, encrypted client-side under the
-// DEK (direct mode). Ciphertext only — the server cannot use or read the key.
+// DEK. Ciphertext only — the server cannot use or read the key.
 router.put('/api-key', async (req, res, next) => {
   try {
     const { api_key_enc } = req.body || {}; // null/undefined clears the key

@@ -15,15 +15,14 @@ backlog. This file is the short list of things not to break.
 
 ## Security invariants — do NOT violate
 - Server stores/logs **ciphertext only**, plus non-sensitive metadata.
-- **Two LLM modes** (`LLM_MODE`, see `server/routes/chat.js`):
-  - `direct` (default): the **browser** calls Anthropic itself with the user's
-    own key (stored DEK-encrypted at `vaults.api_key_enc`, decrypted to memory
-    only). Plaintext never touches the server. Do not add a server hop back
-    into this path.
-  - `proxy` (legacy/OpenAI): the LLM proxy sees plaintext transiently
-    in-request and must never persist or log it.
+- **LLM access is browser-direct only** (proxy mode was removed): the
+  **browser** calls Anthropic itself with the user's own key (stored
+  DEK-encrypted at `vaults.api_key_enc`, decrypted to memory only). Plaintext
+  never touches the server — there is no server-side LLM transport at all
+  (`server/prompts.js` is prompts only; `server/routes/config.js` serves
+  non-secret config). Do not add a server hop back into this path.
   Keep the generic 500 error handler.
-- Vault password, KEK, DEK, and (direct mode) the plaintext API key **never
+- Vault password, KEK, DEK, and the plaintext API key **never
   leave the browser**, except the key going straight to Anthropic over TLS.
   Server only ever receives `kdf_salt`, `kdf_params`, `wrapped_dek`,
   `verifier`, and ciphertext (incl. `api_key_enc`).
@@ -46,7 +45,7 @@ backlog. This file is the short list of things not to break.
 ## Dev commands
 - `npm run check` — syntax-check server modules.
 - `npm run test:crypto` — envelope-encryption invariants (no DB needed).
-- `npm run test:validate` — LLM payload-guard checks (no DB needed).
+- `npm run test:prompts` — prompt/style-catalog sanity checks (no DB needed).
 - `docker compose up -d --build` — full stack (app + postgres) on `127.0.0.1:8080`.
 - Add tests when you add behavior. If you touch crypto, the crypto test must
   still pass and ideally gain a case.

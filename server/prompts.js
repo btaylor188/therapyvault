@@ -1,9 +1,6 @@
-// Provider-agnostic LLM access. The API key lives only here (server-side).
-// Plaintext passes through in-request and is never persisted or logged.
-const PROVIDER = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
-const MODEL = process.env.LLM_MODEL;
-const API_KEY = process.env.LLM_API_KEY;
-const BASE_URL = process.env.LLM_BASE_URL;
+// Shared prompt catalog, served to the browser via /api/config (single source
+// of truth). All LLM calls happen in the BROWSER with the user's own key —
+// there is no server-side LLM transport. Nothing in this file is secret.
 
 export const DEFAULT_SYSTEM = `You are a supportive, evidence-informed therapy companion for ongoing private sessions with one person. You are not a licensed clinician and this is not medical care — be honest about that when it matters, without repeating it constantly.
 
@@ -112,91 +109,3 @@ export const MEMORIZE_SYSTEM =
   'contradict. Omit transient small talk and session-specific detail that will ' +
   'not matter next month. Write in third person, plain prose, under 500 words. ' +
   'Output only the case file.';
-
-// --- Streaming chat. Calls onDelta(textChunk) for each token chunk. ---
-// `model` overrides LLM_MODEL per call (e.g. a cheaper model for summaries).
-export async function streamChat({ messages, system, temperature = 0.7, model }, onDelta) {
-  if (PROVIDER === 'anthropic') return streamAnthropic({ messages, system, temperature, model }, onDelta);
-  if (PROVIDER === 'openai') return streamOpenAI({ messages, system, temperature, model }, onDelta);
-  throw new Error(`unknown LLM_PROVIDER: ${PROVIDER}`);
-}
-
-// --- Non-streaming completion (used for compaction summaries). ---
-export async function complete({ messages, system, temperature = 0.3, model }) {
-  let out = '';
-  await streamChat({ messages, system, temperature, model }, (d) => (out += d));
-  return out;
-}
-
-async function streamAnthropic({ messages, system, model }, onDelta) {
-  const url = (BASE_URL || 'https://api.anthropic.com') + '/v1/messages';
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: model || MODEL,
-      // Claude Sonnet 5 / Opus 4.7+ reject temperature/top_p/top_k (400).
-      // max_tokens covers thinking + reply on models with adaptive thinking.
-      max_tokens: 4096,
-      system: system || DEFAULT_SYSTEM,
-      stream: true,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    }),
-  });
-  if (!resp.ok) throw new Error(`anthropic ${resp.status}: ${await resp.text()}`);
-  await consumeSSE(resp, (evt) => {
-    if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-      onDelta(evt.delta.text);
-    }
-  });
-}
-
-async function streamOpenAI({ messages, system, temperature, model }, onDelta) {
-  const url = (BASE_URL || 'https://api.openai.com/v1') + '/chat/completions';
-  const full = [{ role: 'system', content: system || DEFAULT_SYSTEM }, ...messages];
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({ model: model || MODEL, temperature, stream: true, messages: full }),
-  });
-  if (!resp.ok) throw new Error(`openai ${resp.status}: ${await resp.text()}`);
-  await consumeSSE(resp, (evt) => {
-    const delta = evt.choices?.[0]?.delta?.content;
-    if (delta) onDelta(delta);
-  });
-}
-
-// Minimal SSE parser shared by both providers.
-async function consumeSSE(resp, onEvent) {
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const block = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      for (const line of block.split('\n')) {
-        const t = line.trim();
-        if (!t.startsWith('data:')) continue;
-        const data = t.slice(5).trim();
-        if (data === '[DONE]') return;
-        try {
-          onEvent(JSON.parse(data));
-        } catch {
-          /* ignore keep-alives / non-JSON */
-        }
-      }
-    }
-  }
-}
